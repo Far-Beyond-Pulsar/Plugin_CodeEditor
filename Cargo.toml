@@ -1,0 +1,36 @@
+[package]
+name = "script_editor_plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "script_editor_plugin"
+
+[dependencies]
+# Plugin API
+plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "73e49370b650b9ff645f1bf0a074400236c2d46c" }
+
+# UI dependencies
+gpui = { git = "https://github.com/tristanpoland/zed", rev="2047043a00dc138e3d8127c8921c96927acea8f8", features = ["runtime_shaders", "macos-blade"] }
+ui = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "73e49370b650b9ff645f1bf0a074400236c2d46c" }
+ui_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "73e49370b650b9ff645f1bf0a074400236c2d46c" }
+ui_types_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "73e49370b650b9ff645f1bf0a074400236c2d46c" }
+
+# Engine dependencies
+engine_state = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "73e49370b650b9ff645f1bf0a074400236c2d46c" }
+engine_backend = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "73e49370b650b9ff645f1bf0a074400236c2d46c" }
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+parking_lot = "0.12"
+tracing = "0.1"
+log = "0.4"
+anyhow = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async operations
+futures = "0.3"
