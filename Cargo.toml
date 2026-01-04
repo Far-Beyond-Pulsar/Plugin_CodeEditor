@@ -9,17 +9,17 @@ name = "script_editor_plugin"
 
 [dependencies]
 # Plugin API
-plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "35e16c0258e751a74875d458abcb3b8ffb3cf45e" }
+plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "b4c5800238177bd9eb1ad8b110e37ea9d3b338f2" }
 
 # UI dependencies
 gpui = { git = "https://github.com/tristanpoland/zed", rev="2047043a00dc138e3d8127c8921c96927acea8f8", features = ["runtime_shaders", "macos-blade"] }
-ui = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "35e16c0258e751a74875d458abcb3b8ffb3cf45e" }
-ui_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "35e16c0258e751a74875d458abcb3b8ffb3cf45e" }
-ui_types_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "35e16c0258e751a74875d458abcb3b8ffb3cf45e" }
+ui = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "b4c5800238177bd9eb1ad8b110e37ea9d3b338f2" }
+ui_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "b4c5800238177bd9eb1ad8b110e37ea9d3b338f2" }
+ui_types_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "b4c5800238177bd9eb1ad8b110e37ea9d3b338f2" }
 
 # Engine dependencies
-engine_state = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "35e16c0258e751a74875d458abcb3b8ffb3cf45e" }
-engine_backend = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "35e16c0258e751a74875d458abcb3b8ffb3cf45e" }
+engine_state = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "b4c5800238177bd9eb1ad8b110e37ea9d3b338f2" }
+engine_backend = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "b4c5800238177bd9eb1ad8b110e37ea9d3b338f2" }
 
 # Utilities
 uuid = { version = "1.11", features = ["v4", "serde"] }
