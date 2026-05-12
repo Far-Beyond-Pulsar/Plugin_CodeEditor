@@ -1090,7 +1090,8 @@ impl TextEditor {
                     // Use cached markdown content to avoid re-rendering on every frame
                     let preview_content = &open_file.markdown_preview_cache;
                     
-                    return h_resizable("markdown-split", self.markdown_split_state.clone())
+                    return h_resizable("markdown-split")
+                        .state(self.markdown_split_state.clone())
                         .child(
                             // Left panel: Text editor for editing markdown
                             resizable_panel()

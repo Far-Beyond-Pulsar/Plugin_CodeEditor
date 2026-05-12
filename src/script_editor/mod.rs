@@ -538,7 +538,8 @@ impl Render for ScriptEditor {
                         div()
                             .flex_1()
                             .child(
-                                h_resizable("diff-editors-split", self.diff_resizable_state.clone())
+                                h_resizable("diff-editors-split")
+                                    .state(self.diff_resizable_state.clone())
                                     .child(
                                         resizable_panel()
                                             .child(
@@ -572,7 +573,8 @@ impl Render for ScriptEditor {
             .on_action(cx.listener(Self::save_current_file))
             .on_action(cx.listener(Self::close_current_file))
             .child(
-                h_resizable("script-editor-horizontal", self.horizontal_resizable_state.clone())
+                h_resizable("script-editor-horizontal")
+                    .state(self.horizontal_resizable_state.clone())
                     .child(
                         resizable_panel()
                             .size(px(300.))

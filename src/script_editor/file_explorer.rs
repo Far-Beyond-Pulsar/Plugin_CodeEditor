@@ -390,8 +390,8 @@ impl FileExplorer {
                 Some("toml") | Some("json") => IconName::Settings,
                 Some("md") => IconName::Notes,
                 Some("txt") => IconName::Page,
-                Some("html") => IconName::HTML5,
-                Some("css") => IconName::CSS3,
+                Some("html") => IconName::Html5,
+                Some("css") => IconName::Css3,
                 Some("png") | Some("jpg") | Some("jpeg") | Some("gif") => IconName::MediaImage,
                 _ => IconName::Page,
             }
