@@ -652,9 +652,9 @@ impl FileExplorer {
             .relative()
             .size_full()
             .overflow_hidden()
-            .font_family("monospace")
+            .font_family("JetBrains Mono")
             .font(gpui::Font {
-                family: "Jetbrains Mono".to_string().into(),
+                family: "JetBrains Mono".to_string().into(),
                 weight: gpui::FontWeight::NORMAL,
                 style: gpui::FontStyle::Normal,
                 features: gpui::FontFeatures::default(),

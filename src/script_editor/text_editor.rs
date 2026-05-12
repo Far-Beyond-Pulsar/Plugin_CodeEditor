@@ -919,9 +919,9 @@ impl TextEditor {
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.set_active_file(*ix, window, cx);
             }))
-            .font_family("monospace")
+            .font_family("JetBrains Mono")
             .font(gpui::Font {
-                family: "Jetbrains Mono".to_string().into(),
+                family: "JetBrains Mono".to_string().into(),
                 weight: gpui::FontWeight::NORMAL,
                 style: gpui::FontStyle::Normal,
                 features: gpui::FontFeatures::default(),
@@ -1106,9 +1106,9 @@ impl TextEditor {
                                             TextInput::new(&open_file.input_state)
                                                 .h_full()
                                                 .w_full()
-                                                .font_family("monospace")
+                                                .font_family("JetBrains Mono")
                                                 .font(gpui::Font {
-                                                    family: "Jetbrains Mono".to_string().into(),
+                                                    family: "JetBrains Mono".to_string().into(),
                                                     weight: gpui::FontWeight::NORMAL,
                                                     style: gpui::FontStyle::Normal,
                                                     features: gpui::FontFeatures::default(),
@@ -1130,9 +1130,9 @@ impl TextEditor {
                                             .overflow_y_scroll()
                                             .p_5()
                                             .bg(cx.theme().background)
-                                            .font_family("monospace")
+                                            .font_family("JetBrains Mono")
                                             .font(gpui::Font {
-                                                family: "Jetbrains Mono".to_string().into(),
+                                                family: "JetBrains Mono".to_string().into(),
                                                 weight: gpui::FontWeight::NORMAL,
                                                 style: gpui::FontStyle::Normal,
                                                 features: gpui::FontFeatures::default(),
@@ -1189,9 +1189,9 @@ impl TextEditor {
                         TextInput::new(&open_file.input_state)
                             .h_full()
                             .w_full()
-                            .font_family("monospace")
+                            .font_family("JetBrains Mono")
                             .font(gpui::Font {
-                                family: "Jetbrains Mono".to_string().into(),
+                                family: "JetBrains Mono".to_string().into(),
                                 weight: gpui::FontWeight::NORMAL,
                                 style: gpui::FontStyle::Normal,
                                 features: gpui::FontFeatures::default(),
