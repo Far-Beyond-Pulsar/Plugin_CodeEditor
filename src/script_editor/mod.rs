@@ -60,6 +60,8 @@ pub struct ScriptEditor {
     last_left_scroll: Option<Point<Pixels>>,
     /// Last known scroll offset for right editor (for sync)
     last_right_scroll: Option<Point<Pixels>>,
+    /// Keeps the analyzer event bridge subscription alive and replaceable.
+    _analyzer_sub: Option<Subscription>,
 }
 
 impl ScriptEditor {
@@ -81,7 +83,7 @@ impl ScriptEditor {
             cx.emit(event.clone());
         }).detach();
 
-        let mut editor = Self {
+        Self {
             focus_handle: cx.focus_handle(),
             file_explorer,
             text_editor,
@@ -94,18 +96,8 @@ impl ScriptEditor {
             selected_diff_index: None,
             last_left_scroll: None,
             last_right_scroll: None,
-        };
-
-        // Always attach a Rust analyzer manager so editor LSP features are active by default.
-        let analyzer = cx.new(|cx| RustAnalyzerManager::new(window, cx));
-        if let Ok(project_root) = std::env::current_dir() {
-            analyzer.update(cx, |analyzer, cx| {
-                analyzer.start(project_root, window, cx);
-            });
+            _analyzer_sub: None,
         }
-        editor.set_rust_analyzer(analyzer, cx);
-
-        editor
     }
 
     /// Set the global rust analyzer manager
@@ -121,9 +113,9 @@ impl ScriptEditor {
             editor.set_rust_analyzer(analyzer.clone(), cx);
         });
         
-        // Subscribe to text editor events to forward to rust-analyzer
-        let analyzer_for_sub = analyzer.clone();
-        cx.subscribe(&self.text_editor, move |this: &mut Self, _editor, event: &TextEditorEvent, cx| {
+        // Subscribe to text editor events to forward to rust-analyzer.
+        // Store the subscription so repeated calls replace rather than stack.
+        self._analyzer_sub = Some(cx.subscribe(&self.text_editor, move |this: &mut Self, _editor, event: &TextEditorEvent, cx| {
             tracing::debug!("📨 ScriptEditor received TextEditorEvent: {:?}", std::mem::discriminant(event));
             if let Some(ref analyzer) = this.rust_analyzer {
                 match event {
@@ -172,7 +164,7 @@ impl ScriptEditor {
             } else {
                 tracing::debug!("⚠️  ScriptEditor: rust_analyzer is None!");
             }
-        }).detach();
+        }));
         
         tracing::debug!("✓ ScriptEditor rust-analyzer setup complete");
     }
