@@ -81,7 +81,7 @@ impl ScriptEditor {
             cx.emit(event.clone());
         }).detach();
 
-        Self {
+        let mut editor = Self {
             focus_handle: cx.focus_handle(),
             file_explorer,
             text_editor,
@@ -94,7 +94,18 @@ impl ScriptEditor {
             selected_diff_index: None,
             last_left_scroll: None,
             last_right_scroll: None,
+        };
+
+        // Always attach a Rust analyzer manager so editor LSP features are active by default.
+        let analyzer = cx.new(|cx| RustAnalyzerManager::new(window, cx));
+        if let Ok(project_root) = std::env::current_dir() {
+            analyzer.update(cx, |analyzer, cx| {
+                analyzer.start(project_root, window, cx);
+            });
         }
+        editor.set_rust_analyzer(analyzer, cx);
+
+        editor
     }
 
     /// Set the global rust analyzer manager
