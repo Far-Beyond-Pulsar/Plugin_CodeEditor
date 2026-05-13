@@ -62,6 +62,8 @@ pub struct ScriptEditor {
     last_right_scroll: Option<Point<Pixels>>,
     /// Keeps the analyzer event bridge subscription alive and replaceable.
     _analyzer_sub: Option<Subscription>,
+    /// Last workspace root used to start rust-analyzer.
+    analyzer_workspace_root: Option<PathBuf>,
 }
 
 impl ScriptEditor {
@@ -97,6 +99,43 @@ impl ScriptEditor {
             last_left_scroll: None,
             last_right_scroll: None,
             _analyzer_sub: None,
+            analyzer_workspace_root: None,
+        }
+    }
+
+    fn resolve_workspace_root_for_file(path: &PathBuf) -> PathBuf {
+        let candidate = if path.is_file() {
+            path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone())
+        } else {
+            path.clone()
+        };
+
+        let mut current = candidate.as_path();
+        loop {
+            if current.join("Cargo.toml").exists() {
+                return current.to_path_buf();
+            }
+            if let Some(parent) = current.parent() {
+                current = parent;
+            } else {
+                break;
+            }
+        }
+
+        candidate
+    }
+
+    fn ensure_analyzer_workspace(&mut self, workspace_root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.analyzer_workspace_root.as_ref() == Some(&workspace_root) {
+            return;
+        }
+
+        if let Some(analyzer) = self.rust_analyzer.clone() {
+            println!("[LSP] restarting rust-analyzer for workspace {:?}", workspace_root);
+            analyzer.update(cx, |analyzer, cx| {
+                analyzer.start(workspace_root.clone(), window, cx);
+            });
+            self.analyzer_workspace_root = Some(workspace_root);
         }
     }
 
@@ -171,13 +210,17 @@ impl ScriptEditor {
     
     /// Set the project path and load it in the file explorer
     pub fn set_project_path(&mut self, project_path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        println!("[LSP] ScriptEditor::set_project_path {:?}", project_path);
         tracing::debug!("📁 ScriptEditor::set_project_path called with: {:?}", project_path);
+        self.ensure_analyzer_workspace(project_path.clone(), window, cx);
         self.file_explorer.update(cx, |explorer, cx| {
             explorer.open_project(project_path, window, cx);
         });
     }
 
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace_root = Self::resolve_workspace_root_for_file(&path);
+        self.ensure_analyzer_workspace(workspace_root, window, cx);
         self.text_editor.update(cx, |editor, cx| {
             editor.open_file(path, window, cx);
         });

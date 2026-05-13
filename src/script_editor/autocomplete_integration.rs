@@ -12,6 +12,31 @@ use std::rc::Rc;
 use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
 use engine_backend::services::lsp_completion_provider::GlobalRustAnalyzerCompletionProvider;
 
+fn workspace_from_file(file_path: &PathBuf) -> PathBuf {
+    let candidate = if file_path.is_file() {
+        file_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| file_path.clone())
+    } else {
+        file_path.clone()
+    };
+
+    let mut current = candidate.as_path();
+    loop {
+        if current.join("Cargo.toml").exists() {
+            return current.to_path_buf();
+        }
+        if let Some(parent) = current.parent() {
+            current = parent;
+        } else {
+            break;
+        }
+    }
+
+    candidate
+}
+
 /// Helper function to set up autocomplete for a Rust file with real rust-analyzer completions
 /// 
 /// This configures the input state with:
@@ -26,7 +51,7 @@ pub fn setup_rust_autocomplete(
     window: &mut Window,
     cx: &mut Context<InputState>,
 ) {
-    let workspace = workspace_root.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let workspace = workspace_root.unwrap_or_else(|| workspace_from_file(&file_path));
     
     println!("[AUTOCOMPLETE] setup_rust_autocomplete file={:?} workspace={:?}",
         file_path.file_name(), workspace);
@@ -62,8 +87,8 @@ pub fn setup_javascript_autocomplete(
 ) {
     let provider = ComprehensiveCompletionProvider::new();
     input_state.lsp.completion_provider = Some(Rc::new(provider));
-    
-    let workspace = workspace_root.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    let workspace = workspace_root.unwrap_or_else(|| workspace_from_file(&file_path));
     tracing::debug!("✓ JavaScript/TypeScript autocomplete configured for: {:?} (workspace: {:?})", file_path.file_name(), workspace);
 }
 
@@ -77,8 +102,8 @@ pub fn setup_python_autocomplete(
 ) {
     let provider = ComprehensiveCompletionProvider::new();
     input_state.lsp.completion_provider = Some(Rc::new(provider));
-    
-    let workspace = workspace_root.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    let workspace = workspace_root.unwrap_or_else(|| workspace_from_file(&file_path));
     tracing::debug!("✓ Python autocomplete configured for: {:?} (workspace: {:?})", file_path.file_name(), workspace);
 }
 
@@ -92,8 +117,8 @@ pub fn setup_text_autocomplete(
 ) {
     let provider = ComprehensiveCompletionProvider::new();
     input_state.lsp.completion_provider = Some(Rc::new(provider));
-    
-    let workspace = workspace_root.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    let workspace = workspace_root.unwrap_or_else(|| workspace_from_file(&file_path));
     tracing::debug!("✓ Text autocomplete configured for: {:?} (workspace: {:?})", file_path.file_name(), workspace);
 }
 

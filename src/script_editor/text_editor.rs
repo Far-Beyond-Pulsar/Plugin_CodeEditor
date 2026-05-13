@@ -130,7 +130,6 @@ impl TextEditor {
         // Back-fill LSP providers for files that were already open before the
         // analyzer arrived (e.g., files opened in ScriptEditor::new before the
         // host calls set_rust_analyzer).
-        let workspace_root = std::env::current_dir().ok();
         let files: Vec<(PathBuf, Entity<InputState>)> = self
             .open_files
             .iter()
@@ -144,7 +143,9 @@ impl TextEditor {
             }
             println!("[LSP] Back-filling providers for already-open file {:?}", path.file_name());
             let a2 = analyzer.clone();
-            let ws = workspace_root.clone().unwrap_or_default();
+            let ws = self
+                .resolve_workspace_root_for_file(&path)
+                .unwrap_or_else(|| path.parent().map(|p| p.to_path_buf()).unwrap_or_default());
             let p2 = path.clone();
             input_state.update(cx, |state, _cx| {
                 let provider = std::rc::Rc::new(
@@ -549,7 +550,7 @@ impl TextEditor {
         });
 
         // Set up autocomplete for the file with rust-analyzer support
-        let workspace_root = std::env::current_dir().ok();
+        let workspace_root = self.resolve_workspace_root_for_file(&path);
         if let Some(analyzer) = self.rust_analyzer.clone() {
             println!("[LSP] open_file: rust_analyzer present, calling setup_autocomplete_for_file for {:?}",
                 path.file_name());
@@ -683,6 +684,28 @@ impl TextEditor {
         }
         
         cx.notify();
+    }
+
+    fn resolve_workspace_root_for_file(&self, path: &PathBuf) -> Option<PathBuf> {
+        let candidate = if path.is_file() {
+            path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone())
+        } else {
+            path.clone()
+        };
+
+        let mut current = candidate.as_path();
+        loop {
+            if current.join("Cargo.toml").exists() {
+                return Some(current.to_path_buf());
+            }
+            if let Some(parent) = current.parent() {
+                current = parent;
+            } else {
+                break;
+            }
+        }
+
+        Some(candidate)
     }
 
     fn get_language_from_extension(&self, path: &PathBuf) -> String {
