@@ -110,11 +110,13 @@ impl ScriptEditor {
 
     /// Set the global rust analyzer manager
     pub fn set_rust_analyzer(&mut self, analyzer: Entity<RustAnalyzerManager>, cx: &mut Context<Self>) {
+        println!("[LSP] ScriptEditor::set_rust_analyzer called");
         tracing::debug!("🔧 ScriptEditor::set_rust_analyzer called");
         self.rust_analyzer = Some(analyzer.clone());
         
         // Pass it to the text editor
         self.text_editor.update(cx, |editor, cx| {
+            println!("[LSP] Passing rust-analyzer to TextEditor");
             tracing::debug!("🔧 Passing rust-analyzer to TextEditor");
             editor.set_rust_analyzer(analyzer.clone(), cx);
         });

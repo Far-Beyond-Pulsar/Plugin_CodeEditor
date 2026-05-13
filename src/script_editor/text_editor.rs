@@ -113,9 +113,51 @@ impl TextEditor {
         }
     }
 
-    /// Set the global rust analyzer manager
-    pub fn set_rust_analyzer(&mut self, analyzer: Entity<RustAnalyzerManager>, _cx: &mut Context<Self>) {
-        self.rust_analyzer = Some(analyzer);
+    /// Set the global rust analyzer manager.
+    ///
+    /// Also retroactively wires LSP providers for files already open so that
+    /// files opened before the host analyzer was injected still get full
+    /// completion / hover / go-to-definition support.
+    pub fn set_rust_analyzer(&mut self, analyzer: Entity<RustAnalyzerManager>, cx: &mut Context<Self>) {
+        println!("[LSP] TextEditor::set_rust_analyzer called, open_files={}", self.open_files.len());
+        self.rust_analyzer = Some(analyzer.clone());
+
+        if self.open_files.is_empty() {
+            println!("[LSP] No open files to back-fill LSP providers for.");
+            return;
+        }
+
+        // Back-fill LSP providers for files that were already open before the
+        // analyzer arrived (e.g., files opened in ScriptEditor::new before the
+        // host calls set_rust_analyzer).
+        let workspace_root = std::env::current_dir().ok();
+        let files: Vec<(PathBuf, Entity<InputState>)> = self
+            .open_files
+            .iter()
+            .map(|f| (f.path.clone(), f.input_state.clone()))
+            .collect();
+
+        for (path, input_state) in files {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_owned();
+            if ext != "rs" {
+                continue; // Only Rust files use rust-analyzer
+            }
+            println!("[LSP] Back-filling providers for already-open file {:?}", path.file_name());
+            let a2 = analyzer.clone();
+            let ws = workspace_root.clone().unwrap_or_default();
+            let p2 = path.clone();
+            input_state.update(cx, |state, _cx| {
+                let provider = std::rc::Rc::new(
+                    engine_backend::services::lsp_completion_provider::GlobalRustAnalyzerCompletionProvider::new(
+                        a2, p2, ws,
+                    ),
+                );
+                state.lsp.completion_provider = Some(provider.clone());
+                state.lsp.definition_provider = Some(provider.clone());
+                state.lsp.hover_provider = Some(provider);
+                println!("[LSP] Back-fill done for {:?}", path.file_name());
+            });
+        }
     }
     
     /// Add pending file panels to the first available TabPanel
@@ -509,6 +551,8 @@ impl TextEditor {
         // Set up autocomplete for the file with rust-analyzer support
         let workspace_root = std::env::current_dir().ok();
         if let Some(analyzer) = self.rust_analyzer.clone() {
+            println!("[LSP] open_file: rust_analyzer present, calling setup_autocomplete_for_file for {:?}",
+                path.file_name());
             input_state.update(cx, |state, cx| {
                 super::setup_autocomplete_for_file(
                     state,
@@ -520,6 +564,8 @@ impl TextEditor {
                 );
             });
         } else {
+            println!("[LSP] open_file: rust_analyzer is NONE – LSP features will NOT work for {:?}",
+                path.file_name());
             tracing::debug!("⚠️  rust-analyzer not available, completions will be limited");
         }
 

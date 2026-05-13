@@ -28,6 +28,9 @@ pub fn setup_rust_autocomplete(
 ) {
     let workspace = workspace_root.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     
+    println!("[AUTOCOMPLETE] setup_rust_autocomplete file={:?} workspace={:?}",
+        file_path.file_name(), workspace);
+
     // For Rust files, use rust-analyzer for everything
     let rust_provider = GlobalRustAnalyzerCompletionProvider::new(
         analyzer,
@@ -39,7 +42,12 @@ pub fn setup_rust_autocomplete(
     let rust_provider_rc = Rc::new(rust_provider);
     input_state.lsp.completion_provider = Some(rust_provider_rc.clone());
     input_state.lsp.definition_provider = Some(rust_provider_rc.clone());
-    input_state.lsp.hover_provider = Some(rust_provider_rc); // Use rust-analyzer for hover too!
+    input_state.lsp.hover_provider = Some(rust_provider_rc);
+
+    println!("[AUTOCOMPLETE] providers set: completion={} hover={} definition={}",
+        input_state.lsp.completion_provider.is_some(),
+        input_state.lsp.hover_provider.is_some(),
+        input_state.lsp.definition_provider.is_some());
     
     tracing::debug!("✓ Autocomplete, Hover, and Go-to-Definition configured for: {:?} (workspace: {:?})", file_path.file_name(), workspace);
 }
