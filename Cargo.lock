@@ -1895,7 +1895,7 @@ dependencies = [
  "futures",
  "git2",
  "glam 0.29.3",
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "helio 0.17.0 (git+https://github.com/Far-Beyond-Pulsar/Helio?rev=4b006824e44a086651884ace001d76caaa977e7a)",
  "helio-asset-compat",
  "lsp-types",
@@ -1929,7 +1929,7 @@ dependencies = [
  "anyhow",
  "dashmap 6.1.0",
  "directories",
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "parking_lot",
  "pulsar-config",
  "pulsar_settings",
@@ -2911,7 +2911,74 @@ dependencies = [
  "pin-project",
  "pollster 0.4.0",
  "postage",
- "priority-threadpool",
+ "priority-threadpool 0.1.0 (git+https://github.com/mdeand/priority-threadpool)",
+ "profiling 1.0.17",
+ "rand 0.10.1",
+ "raw-window-handle",
+ "resvg 0.47.0",
+ "schemars",
+ "seahash",
+ "semver 1.0.27",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "smallvec",
+ "smol 2.0.2",
+ "spin 0.10.0",
+ "stacksafe",
+ "strum",
+ "taffy",
+ "thiserror 2.0.17",
+ "usvg 0.47.0",
+ "uuid",
+ "waker-fn",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "gpui-ce"
+version = "1.0.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=b43b910b2bb71c3a1faacf7837d585bcc24c718b#b43b910b2bb71c3a1faacf7837d585bcc24c718b"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "async-task",
+ "bytemuck",
+ "circular-buffer",
+ "core-video",
+ "cosmic-text",
+ "ctor",
+ "derive_more 2.1.1",
+ "device_query",
+ "etagere",
+ "flume 0.12.0",
+ "font-kit",
+ "futures",
+ "gpui-macros",
+ "gpui_collections",
+ "gpui_http_client",
+ "gpui_refineable",
+ "gpui_sum_tree",
+ "gpui_util",
+ "gpui_util_macros",
+ "image",
+ "inventory",
+ "itertools 0.14.0",
+ "libc",
+ "log",
+ "lyon",
+ "num_cpus",
+ "objc2 0.5.2",
+ "objc2-app-kit 0.2.2",
+ "objc2-foundation 0.2.2",
+ "parking",
+ "parking_lot",
+ "pathfinder_geometry",
+ "pin-project",
+ "pollster 0.4.0",
+ "postage",
+ "priority-threadpool 0.1.0 (git+https://github.com/tristanpoland/priority-threadpool?rev=bb1ab91)",
  "profiling 1.0.17",
  "rand 0.10.1",
  "raw-window-handle",
@@ -4818,6 +4885,14 @@ dependencies = [
 [[package]]
 name = "lockfree"
 version = "0.5.1"
+source = "git+https://github.com/tristanpoland/priority-threadpool?rev=bb1ab91#bb1ab91e284332975ca6889303582c7352ec6509"
+dependencies = [
+ "owned-alloc",
+]
+
+[[package]]
+name = "lockfree"
+version = "0.5.1"
 source = "git+https://github.com/mdeand/priority-threadpool#28df6ed5ebef6818f2ea0cde9bfd99d3067d42ce"
 dependencies = [
  "owned-alloc",
@@ -6266,7 +6341,7 @@ name = "plugin_editor_api"
 version = "0.1.0"
 source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=f099bdb68053f95c769d4588fd26eae3b8eb6bcf#f099bdb68053f95c769d4588fd26eae3b8eb6bcf"
 dependencies = [
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "serde",
  "serde_json",
  "tracing",
@@ -6473,10 +6548,19 @@ dependencies = [
 [[package]]
 name = "priority-threadpool"
 version = "0.1.0"
+source = "git+https://github.com/tristanpoland/priority-threadpool?rev=bb1ab91#bb1ab91e284332975ca6889303582c7352ec6509"
+dependencies = [
+ "async-task",
+ "lockfree 0.5.1 (git+https://github.com/tristanpoland/priority-threadpool?rev=bb1ab91)",
+]
+
+[[package]]
+name = "priority-threadpool"
+version = "0.1.0"
 source = "git+https://github.com/mdeand/priority-threadpool#28df6ed5ebef6818f2ea0cde9bfd99d3067d42ce"
 dependencies = [
  "async-task",
- "lockfree",
+ "lockfree 0.5.1 (git+https://github.com/mdeand/priority-threadpool)",
 ]
 
 [[package]]
@@ -6624,7 +6708,7 @@ source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=f099bdb6805
 dependencies = [
  "anyhow",
  "flume 0.11.1",
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "lsp-types",
  "pulsar_diagnostics",
  "ropey",
@@ -6671,7 +6755,7 @@ name = "pulsar_replication"
 version = "0.1.0"
 source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=f099bdb68053f95c769d4588fd26eae3b8eb6bcf#f099bdb68053f95c769d4588fd26eae3b8eb6bcf"
 dependencies = [
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "parking_lot",
  "serde",
  "serde_json",
@@ -7711,7 +7795,7 @@ dependencies = [
  "engine_backend",
  "engine_state",
  "futures",
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=b43b910b2bb71c3a1faacf7837d585bcc24c718b)",
  "log",
  "parking_lot",
  "plugin_editor_api",
@@ -9206,7 +9290,7 @@ dependencies = [
  "chrono",
  "directories",
  "enum-iterator",
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "gpui-component-macros",
  "gpui_sum_tree",
  "html5ever",
@@ -9258,7 +9342,7 @@ version = "0.1.0"
 source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=f099bdb68053f95c769d4588fd26eae3b8eb6bcf#f099bdb68053f95c769d4588fd26eae3b8eb6bcf"
 dependencies = [
  "anyhow",
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "parking_lot",
  "rust-i18n",
  "serde",
@@ -10090,7 +10174,7 @@ source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=f099bdb6805
 dependencies = [
  "anyhow",
  "dashmap 6.1.0",
- "gpui-ce",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=1f6f3843e8bea050ed3882b45b5ca1d433adf61f)",
  "parking_lot",
  "serde",
  "thiserror 2.0.17",
