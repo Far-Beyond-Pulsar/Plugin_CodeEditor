@@ -113,9 +113,43 @@ impl TextEditor {
         }
     }
 
-    /// Set the global rust analyzer manager
-    pub fn set_rust_analyzer(&mut self, analyzer: Entity<RustAnalyzerManager>, _cx: &mut Context<Self>) {
-        self.rust_analyzer = Some(analyzer);
+    /// Set the global rust analyzer manager.
+    ///
+    /// Also refreshes the LSP providers for every file that is already open so
+    /// that files opened before the host-side analyzer was injected still get
+    /// full completion / hover / go-to-definition support.
+    pub fn set_rust_analyzer(&mut self, analyzer: Entity<RustAnalyzerManager>, cx: &mut Context<Self>) {
+        self.rust_analyzer = Some(analyzer.clone());
+
+        // Re-wire LSP providers for files that were opened before the analyzer arrived.
+        let workspace_root = std::env::current_dir().ok();
+        let paths_to_update: Vec<(PathBuf, Entity<InputState>)> = self
+            .open_files
+            .iter()
+            .map(|f| (f.path.clone(), f.input_state.clone()))
+            .collect();
+
+        for (path, input_state) in paths_to_update {
+            let analyzer = analyzer.clone();
+            let workspace = workspace_root.clone();
+            input_state.update(cx, |state, cx| {
+                // Only Rust files use the rust-analyzer provider; other languages
+                // already have a provider set via setup_autocomplete_for_file.
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "rs" {
+                    let rust_provider = std::rc::Rc::new(
+                        engine_backend::services::lsp_completion_provider::GlobalRustAnalyzerCompletionProvider::new(
+                            analyzer,
+                            path,
+                            workspace.unwrap_or_default(),
+                        ),
+                    );
+                    state.lsp.completion_provider = Some(rust_provider.clone());
+                    state.lsp.definition_provider = Some(rust_provider.clone());
+                    state.lsp.hover_provider = Some(rust_provider);
+                }
+            });
+        }
     }
     
     /// Add pending file panels to the first available TabPanel
