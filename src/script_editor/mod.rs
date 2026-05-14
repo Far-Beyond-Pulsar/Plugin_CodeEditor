@@ -424,6 +424,10 @@ impl Panel for ScriptEditor {
         "Script Editor"
     }
 
+    fn panel_file_path(&self, cx: &App) -> Option<std::path::PathBuf> {
+        self.text_editor.read(cx).current_file_path()
+    }
+
     fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
         div().child("Script Editor").into_any_element()
     }
