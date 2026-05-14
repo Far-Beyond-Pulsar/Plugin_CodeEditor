@@ -12,7 +12,7 @@ name = "script_editor_plugin"
 plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
 
 # UI dependencies
-gpui-ce = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI", rev="b43b910b2bb71c3a1faacf7837d585bcc24c718b" }
+gpui-ce = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI", rev="fa0d7604d8174a311429a2f656091966838602ec" }
 ui = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
 ui_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
 ui_types_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }

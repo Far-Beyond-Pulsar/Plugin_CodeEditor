@@ -2939,7 +2939,7 @@ dependencies = [
 [[package]]
 name = "gpui-ce"
 version = "1.0.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=b43b910b2bb71c3a1faacf7837d585bcc24c718b#b43b910b2bb71c3a1faacf7837d585bcc24c718b"
+source = "git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=fa0d7604d8174a311429a2f656091966838602ec#fa0d7604d8174a311429a2f656091966838602ec"
 dependencies = [
  "anyhow",
  "arboard",
@@ -7795,7 +7795,7 @@ dependencies = [
  "engine_backend",
  "engine_state",
  "futures",
- "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=b43b910b2bb71c3a1faacf7837d585bcc24c718b)",
+ "gpui-ce 1.0.0 (git+https://github.com/Far-Beyond-Pulsar/WGPUI?rev=fa0d7604d8174a311429a2f656091966838602ec)",
  "log",
  "parking_lot",
  "plugin_editor_api",
