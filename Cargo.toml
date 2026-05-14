@@ -9,17 +9,17 @@ name = "script_editor_plugin"
 
 [dependencies]
 # Plugin API
-plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
+plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "7e58c28b602428d9106d2ca3b22e09a4948341b7" }
 
 # UI dependencies
 gpui-ce = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI", rev="fa0d7604d8174a311429a2f656091966838602ec" }
-ui = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
-ui_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
-ui_types_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
+ui = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "7e58c28b602428d9106d2ca3b22e09a4948341b7" }
+ui_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "7e58c28b602428d9106d2ca3b22e09a4948341b7" }
+ui_types_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "7e58c28b602428d9106d2ca3b22e09a4948341b7" }
 
 # Engine dependencies
-engine_state = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
-engine_backend = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f099bdb68053f95c769d4588fd26eae3b8eb6bcf" }
+engine_state = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "7e58c28b602428d9106d2ca3b22e09a4948341b7" }
+engine_backend = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "7e58c28b602428d9106d2ca3b22e09a4948341b7" }
 
 # Utilities
 uuid = { version = "1.11", features = ["v4", "serde"] }
