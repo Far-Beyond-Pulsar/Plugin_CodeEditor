@@ -148,17 +148,16 @@ impl EditorPlugin for ScriptEditorPlugin {
         }]
     }
 
-    fn create_editor(
-        &self,
-        editor_id: EditorId,
-        file_path: PathBuf,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Result<Arc<dyn PanelView>, PluginError> {
-        if editor_id.as_str() == "script-editor" {
+    fn on_load(&mut self) {
+        log::info!("Script Editor Plugin loaded");
+    }
+}
+
+impl EditorPluginEditor for ScriptEditorPlugin {
+    fn register_editors(&'static self, registry: &mut EditorFactoryRegistry) {
+        registry.register_fn(EditorId::new("script-editor"), |file_path, window, cx| {
             let panel = cx.new(|cx| ScriptEditorPanel::new(window, cx));
 
-            // Open the file in the editor
             panel.update(cx, |editor, ecx| {
                 editor.open_file(file_path.clone(), window, ecx);
             });
@@ -166,13 +165,20 @@ impl EditorPlugin for ScriptEditorPlugin {
             let panel_arc: Arc<dyn ui::dock::PanelView> = Arc::new(panel.clone());
             log::info!("Created script editor instance for {:?}", file_path);
             Ok(panel_arc)
-        } else {
-            Err(PluginError::EditorNotFound { editor_id })
-        }
+        });
     }
+}
 
-    fn on_load(&mut self) {
-        log::info!("Script Editor Plugin loaded");
+impl EditorPluginStatusbar for ScriptEditorPlugin {}
+impl EditorPluginAi for ScriptEditorPlugin {}
+impl EditorPluginComponents for ScriptEditorPlugin {
+    fn component_definitions(&self) -> Vec<ComponentDefinition> {
+        Vec::new()
+    }
+}
+impl EditorPluginSubsystems for ScriptEditorPlugin {
+    fn subsystems(&self) -> Vec<Box<dyn Subsystem>> {
+        Vec::new()
     }
 }
 
