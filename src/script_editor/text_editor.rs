@@ -1081,6 +1081,28 @@ impl TextEditor {
             return div().into_any_element();
         }
 
+        let file_count = self.open_files.len();
+        let tab_data: Vec<(SharedString, bool)> = self
+            .open_files
+            .iter()
+            .map(|f| {
+                let filename = f
+                    .path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("untitled");
+                let display = if f.is_modified {
+                    format!("● {filename}")
+                } else {
+                    filename.to_string()
+                };
+                (display.into(), false)
+            })
+            .collect();
+        let tab_labels: Vec<(Option<SharedString>, bool)> =
+            tab_data.iter().map(|(l, d)| (Some(l.clone()), *d)).collect();
+        let entity = cx.entity().downgrade();
+
         TabBar::new("editor-tabs")
             .w_full()
             .bg(cx.theme().secondary)
@@ -1100,37 +1122,29 @@ impl TextEditor {
                     "monospace".to_string()
                 ])),
             })
-            .children(
-                self.open_files
-                    .iter()
-                    .enumerate()
-                    .map(|(index, open_file)| {
-                        let filename = open_file
-                            .path
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .unwrap_or("untitled")
-                            .to_string();
-
-                        let display_name = if open_file.is_modified {
-                            format!("● {}", filename)
-                        } else {
-                            filename
-                        };
-
-                        Tab::new(display_name).child(
-                            h_flex().items_center().gap_2().child(
-                                Button::new(("close", index))
-                                    .icon(IconName::Close)
-                                    .ghost()
-                                    .xsmall()
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.close_file(index, window, cx);
-                                    })),
-                            ),
-                        )
-                    }),
-            )
+            .build_tabs(file_count, tab_labels, {
+                let data = tab_data.clone();
+                let entity = entity.clone();
+                move |ix, _, cx| {
+                    let (label, _) = &data[ix];
+                    let entity_c = entity.clone();
+                    Tab::new(label.clone()).child(
+                        h_flex().items_center().gap_2().child(
+                            Button::new(("close", ix))
+                                .icon(IconName::Close)
+                                .ghost()
+                                .xsmall()
+                                .on_click(move |_, window, cx| {
+                                    if let Some(entity) = entity_c.upgrade() {
+                                        entity.update(cx, |this, cx| {
+                                            this.close_file(ix, window, cx);
+                                        });
+                                    }
+                                }),
+                        ),
+                    )
+                }
+            })
             .into_any_element()
     }
 
