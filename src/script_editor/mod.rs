@@ -548,6 +548,24 @@ impl Panel for ScriptEditor {
             ..Default::default()
         }
     }
+
+    /// Never cached.
+    ///
+    /// Everything below here is a `ui::input::TextInput`, and `TextElement`
+    /// records `last_bounds`, `last_layout`, `last_cursor`,
+    /// `last_selected_range` and `scroll_size` *during paint*. The mouse
+    /// handlers turn a pixel position into a text index with `last_layout` /
+    /// `last_bounds`, and wheel scrolling is mapped through `scroll_size`. A
+    /// cached view that reuses replays recorded index ranges and never runs
+    /// paint, so those stashes go stale and click-drag selection skips while
+    /// the scroll wheel maps against the wrong content size.
+    ///
+    /// An editor the user is actively typing or dragging in is dirty on
+    /// essentially every frame anyway, so it was getting almost nothing out of
+    /// the cache. See `ui::dock::Panel::cacheable`.
+    fn cacheable(&self, _cx: &App) -> bool {
+        false
+    }
 }
 
 // Plugin-related methods (called by ScriptEditorWrapper)

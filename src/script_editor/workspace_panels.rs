@@ -67,6 +67,12 @@ impl Panel for FilePanelWrapper {
         "file"
     }
 
+    /// Never cached — this panel *is* a `TextInput`. See
+    /// `ui::dock::Panel::cacheable` and `ScriptEditor::cacheable`.
+    fn cacheable(&self, _cx: &App) -> bool {
+        false
+    }
+
     fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
         let filename = self.file_path.file_name()
             .and_then(|n| n.to_str())
