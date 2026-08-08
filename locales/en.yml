@@ -1,0 +1,28 @@
+# Code Editor translations - en
+
+CodeEditor.Explorer: Explorer
+CodeEditor.NewFile: New File
+CodeEditor.NewFolder: New Folder
+CodeEditor.Refresh: Refresh
+CodeEditor.OpenFolder: Open Folder
+CodeEditor.NoFolderOpened: No folder opened
+CodeEditor.ScriptEditor: Script Editor
+CodeEditor.BeforeLocal: BEFORE (Local)
+CodeEditor.AfterRemote: AFTER (Remote)
+CodeEditor.NewFileShortcut: New File (Ctrl+N)
+CodeEditor.Save: Save (Ctrl+S)
+CodeEditor.RefreshPreview: Refresh Markdown Preview (Ctrl+R)
+CodeEditor.Find: Find (Ctrl+F)
+CodeEditor.Replace: Replace (Ctrl+H)
+CodeEditor.PerfStats: Toggle Performance Stats (F12)
+CodeEditor.RunScript: Run Script (F5)
+CodeEditor.DebugScript: Debug Script (F9)
+CodeEditor.MarkdownReady: Markdown preview ready
+CodeEditor.RefreshHint: Click the refresh button or press Ctrl+R to update
+CodeEditor.Welcome: Welcome to Script Editor
+CodeEditor.OpenFileHint: Open a file from the explorer to start editing
+CodeEditor.Utf8: UTF-8
+CodeEditor.Lf: LF
+CodeEditor.LnCol: Ln 1, Col 1
+CodeEditor.Spaces4: "Spaces: 4"
+CodeEditor.Loading: Loading...

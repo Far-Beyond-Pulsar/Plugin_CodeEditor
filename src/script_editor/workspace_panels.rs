@@ -1,5 +1,6 @@
 //! Workspace panels for Script Editor
 
+use rust_i18n::t;
 use gpui::*;
 use ui::{ActiveTheme, StyledExt, dock::{Panel, PanelEvent}, v_flex, input::InputState};
 use std::path::PathBuf;
@@ -103,13 +104,13 @@ impl Render for WelcomePanelWrapper {
                     .text_xl()
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(cx.theme().foreground)
-                    .child("Welcome to Script Editor")
+                    .child(t!("CodeEditor.Welcome").to_string())
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Open a file from the explorer to start editing")
+                    .child(t!("CodeEditor.OpenFileHint").to_string())
             )
     }
 }

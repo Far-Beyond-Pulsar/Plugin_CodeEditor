@@ -1,3 +1,4 @@
+use rust_i18n::t;
 use gpui::*;
 use ui::{
     button::{Button, ButtonVariants as _},
@@ -1092,7 +1093,7 @@ impl TextEditor {
                     .and_then(|n| n.to_str())
                     .unwrap_or("untitled");
                 let display = if f.is_modified {
-                    format!("● {filename}")
+                    format!("● {filename}").to_string()
                 } else {
                     filename.to_string()
                 };
@@ -1172,7 +1173,7 @@ impl TextEditor {
                     .child(
                         Button::new("new_file")
                             .icon(IconName::Plus)
-                            .tooltip("New File (Ctrl+N)")
+                            .tooltip(t!("CodeEditor.NewFileShortcut").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1182,7 +1183,7 @@ impl TextEditor {
                     .child(
                         Button::new("save")
                             .icon(IconName::FloppyDisk)
-                            .tooltip("Save (Ctrl+S)")
+                            .tooltip(t!("CodeEditor.Save").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1193,7 +1194,7 @@ impl TextEditor {
                         Some(
                             Button::new("refresh_preview")
                                 .icon(IconName::Refresh)
-                                .tooltip("Refresh Markdown Preview (Ctrl+R)")
+                                .tooltip(t!("CodeEditor.RefreshPreview").to_string())
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(|this, _, _window, cx| {
@@ -1206,7 +1207,7 @@ impl TextEditor {
                     .child(
                         Button::new("find")
                             .icon(IconName::Search)
-                            .tooltip("Find (Ctrl+F)")
+                            .tooltip(t!("CodeEditor.Find").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1216,7 +1217,7 @@ impl TextEditor {
                     .child(
                         Button::new("replace")
                             .icon(IconName::Replace)
-                            .tooltip("Replace (Ctrl+H)")
+                            .tooltip(t!("CodeEditor.Replace").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1226,7 +1227,7 @@ impl TextEditor {
                     .child(if self.show_performance_stats {
                         Button::new("toggle_stats")
                             .icon(IconName::Search)
-                            .tooltip("Toggle Performance Stats (F12)")
+                            .tooltip(t!("CodeEditor.PerfStats").to_string())
                             .small()
                             .with_variant(ui::button::ButtonVariant::Primary)
                             .on_click(cx.listener(|this, _, _window, cx| {
@@ -1236,7 +1237,7 @@ impl TextEditor {
                     } else {
                         Button::new("toggle_stats")
                             .icon(IconName::Search)
-                            .tooltip("Toggle Performance Stats (F12)")
+                            .tooltip(t!("CodeEditor.PerfStats").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _window, cx| {
@@ -1251,7 +1252,7 @@ impl TextEditor {
                     .child(
                         Button::new("run")
                             .icon(IconName::ArrowRight)
-                            .tooltip("Run Script (F5)")
+                            .tooltip(t!("CodeEditor.RunScript").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1261,7 +1262,7 @@ impl TextEditor {
                     .child(
                         Button::new("debug")
                             .icon(IconName::Search)
-                            .tooltip("Debug Script (F9)")
+                            .tooltip(t!("CodeEditor.DebugScript").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1356,12 +1357,12 @@ impl TextEditor {
                                                     .child(
                                                         div()
                                                             .text_sm()
-                                                            .child("Markdown preview ready")
+                                                            .child(t!("CodeEditor.MarkdownReady").to_string())
                                                     )
                                                     .child(
                                                         div()
                                                             .text_xs()
-                                                            .child("Click the refresh button or press Ctrl+R to update")
+                                                            .child(t!("CodeEditor.RefreshHint").to_string())
                                                     )
                                             )
                                     }
@@ -1416,14 +1417,14 @@ impl TextEditor {
                             .text_2xl()
                             .font_semibold()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Welcome to Script Editor"),
+                            .child(t!("CodeEditor.Welcome").to_string()),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .text_center()
-                            .child("Open a file from the explorer to start editing"),
+                            .child(t!("CodeEditor.OpenFileHint").to_string()),
                     )
                     .child(
                         h_flex()
@@ -1431,7 +1432,7 @@ impl TextEditor {
                             .mt_4()
                             .child(
                                 Button::new("new_file_welcome")
-                                    .label("New File")
+                                    .label(t!("CodeEditor.NewFile").to_string())
                                     .icon(IconName::Plus)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.create_new_file(window, cx);
@@ -1439,7 +1440,7 @@ impl TextEditor {
                             )
                             .child(
                                 Button::new("open_folder_welcome")
-                                    .label("Open Folder")
+                                    .label(t!("CodeEditor.OpenFolder").to_string())
                                     .icon(IconName::FolderOpen)
                                     .with_variant(ui::button::ButtonVariant::Primary)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1519,8 +1520,8 @@ impl TextEditor {
                 h_flex()
                     .gap_4()
                     .child(file_info.0)
-                    .child("UTF-8")
-                    .child("LF"),
+                    .child(t!("CodeEditor.Utf8").to_string())
+                    .child(t!("CodeEditor.Lf").to_string()),
             )
             .child({
                 let mut flex = h_flex().gap_4();
@@ -1529,8 +1530,8 @@ impl TextEditor {
                     flex = flex.child(cache_info.clone());
                 }
 
-                flex.child("Ln 1, Col 1")
-                    .child("Spaces: 4")
+                flex.child(t!("CodeEditor.LnCol").to_string())
+                    .child(t!("CodeEditor.Spaces4").to_string())
                     .child(file_info.1)
             })
     }
@@ -1800,7 +1801,7 @@ impl Render for TextEditor {
                 if let Some(ref workspace) = self.workspace {
                     workspace.clone().into_any_element()
                 } else {
-                    div().child("Loading...").into_any_element()
+                    div().child(t!("CodeEditor.Loading").to_string()).into_any_element()
                 },
             ))
             .child(self.render_status_bar(cx));

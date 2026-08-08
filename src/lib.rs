@@ -17,6 +17,8 @@
 //!
 //! - **Script Editor**: Code editor with file explorer, syntax highlighting, and LSP support
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 use plugin_editor_api::*;
 use serde_json::json;
 use std::path::PathBuf;

@@ -32,6 +32,9 @@ parking_lot = "0.12"
 tracing = "0.1"
 log = "0.4"
 anyhow = "1.0"
+rust-i18n = "=4.2.1"
+rust-i18n-macro = "=4.2.1"
+rust-i18n-support = "=4.2.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
