@@ -1,3 +1,4 @@
+use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -938,7 +939,7 @@ impl Render for FileExplorer {
                                     .text_sm()
                                     .font_semibold()
                                     .text_color(cx.theme().foreground)
-                                    .child("Explorer")
+                                    .child(t!("CodeEditor.Explorer").to_string())
                             )
                             .child(
                                 h_flex()
@@ -946,7 +947,7 @@ impl Render for FileExplorer {
                                     .child(
                                         Button::new("new_file")
                                             .icon(IconName::Plus)
-                                            .tooltip("New File")
+                                            .tooltip(t!("CodeEditor.NewFile").to_string())
                                             .ghost()
                                             .xsmall()
                                             .on_click(cx.listener(|this, _, window, cx| {
@@ -956,7 +957,7 @@ impl Render for FileExplorer {
                                     .child(
                                         Button::new("new_folder")
                                             .icon(IconName::Folder)
-                                            .tooltip("New Folder")
+                                            .tooltip(t!("CodeEditor.NewFolder").to_string())
                                             .ghost()
                                             .xsmall()
                                             .on_click(cx.listener(|this, _, window, cx| {
@@ -966,7 +967,7 @@ impl Render for FileExplorer {
                                     .child(
                                         Button::new("refresh")
                                             .icon(IconName::Asterisk)
-                                            .tooltip("Refresh")
+                                            .tooltip(t!("CodeEditor.Refresh").to_string())
                                             .ghost()
                                             .xsmall()
                                             .on_click(cx.listener(|this, _, _window, cx| {
@@ -976,7 +977,7 @@ impl Render for FileExplorer {
                                     .child(
                                         Button::new("open_folder")
                                             .icon(IconName::FolderOpen)
-                                            .tooltip("Open Folder")
+                                            .tooltip(t!("CodeEditor.OpenFolder").to_string())
                                             .ghost()
                                             .xsmall()
                                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1015,7 +1016,7 @@ impl Render for FileExplorer {
                                             div()
                                                 .text_sm()
                                                 .text_color(cx.theme().muted_foreground)
-                                                .child("No folder opened")
+                                                .child(t!("CodeEditor.NoFolderOpened").to_string())
                                         )
                                         .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
                                             if let Ok(cwd) = std::env::current_dir() {

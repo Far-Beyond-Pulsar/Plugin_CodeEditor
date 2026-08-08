@@ -8,6 +8,7 @@ pub use file_explorer::FileExplorer;
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use workspace_panels::*;
 
+use rust_i18n::t;
 use gpui::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -539,7 +540,7 @@ impl Panel for ScriptEditor {
     }
 
     fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
-        div().child("Script Editor").into_any_element()
+        div().child(t!("CodeEditor.ScriptEditor").to_string()).into_any_element()
     }
 
     fn dump(&self, _cx: &App) -> ui::dock::PanelState {
@@ -690,7 +691,7 @@ impl Render for ScriptEditor {
                                             .text_xs()
                                             .font_semibold()
                                             .text_color(cx.theme().danger)
-                                            .child("BEFORE (Local)"),
+                                            .child(t!("CodeEditor.BeforeLocal").to_string()),
                                     ),
                             )
                             .child(
@@ -699,7 +700,7 @@ impl Render for ScriptEditor {
                                         .text_xs()
                                         .font_semibold()
                                         .text_color(cx.theme().success)
-                                        .child("AFTER (Remote)"),
+                                        .child(t!("CodeEditor.AfterRemote").to_string()),
                                 ),
                             ),
                     )
