@@ -5,7 +5,6 @@ use ui::{
     h_flex,
     input::{InputEvent, InputState, TabSize, TextInput},
     resizable::{h_resizable, resizable_panel, ResizableState},
-    tab::{Tab, TabBar},
     v_flex, ActiveTheme as _, IconName, Sizable as _, StyledExt,
 };
 
@@ -870,13 +869,6 @@ impl TextEditor {
         }
     }
 
-    fn set_active_file(&mut self, index: usize, _window: &mut Window, cx: &mut Context<Self>) {
-        if index < self.open_files.len() {
-            self.current_file_index = Some(index);
-            cx.notify();
-        }
-    }
-
     pub fn save_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         if let Some(index) = self.current_file_index {
             if let Some(open_file) = self.open_files.get_mut(index) {
@@ -1075,78 +1067,6 @@ impl TextEditor {
                 }
             }
         }
-    }
-
-    fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.open_files.is_empty() {
-            return div().into_any_element();
-        }
-
-        let file_count = self.open_files.len();
-        let tab_data: Vec<(SharedString, bool)> = self
-            .open_files
-            .iter()
-            .map(|f| {
-                let filename = f
-                    .path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("untitled");
-                let display = if f.is_modified {
-                    format!("● {filename}").to_string()
-                } else {
-                    filename.to_string()
-                };
-                (display.into(), false)
-            })
-            .collect();
-        let tab_labels: Vec<(Option<SharedString>, bool)> =
-            tab_data.iter().map(|(l, d)| (Some(l.clone()), *d)).collect();
-        let entity = cx.entity().downgrade();
-
-        TabBar::new("editor-tabs")
-            .w_full()
-            .bg(cx.theme().secondary)
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .selected_index(self.current_file_index.unwrap_or(0))
-            .on_click(cx.listener(|this, ix: &usize, window, cx| {
-                this.set_active_file(*ix, window, cx);
-            }))
-            .font_family("JetBrains Mono")
-            .font(gpui::Font {
-                family: "JetBrains Mono".to_string().into(),
-                weight: gpui::FontWeight::NORMAL,
-                style: gpui::FontStyle::Normal,
-                features: gpui::FontFeatures::default(),
-                fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
-                    "monospace".to_string()
-                ])),
-            })
-            .build_tabs(file_count, tab_labels, {
-                let data = tab_data.clone();
-                let entity = entity.clone();
-                move |ix, _, cx| {
-                    let (label, _) = &data[ix];
-                    let entity_c = entity.clone();
-                    Tab::new(label.clone()).child(
-                        h_flex().items_center().gap_2().child(
-                            Button::new(("close", ix))
-                                .icon(IconName::Close)
-                                .ghost()
-                                .xsmall()
-                                .on_click(move |_, window, cx| {
-                                    if let Some(entity) = entity_c.upgrade() {
-                                        entity.update(cx, |this, cx| {
-                                            this.close_file(ix, window, cx);
-                                        });
-                                    }
-                                }),
-                        ),
-                    )
-                }
-            })
-            .into_any_element()
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {

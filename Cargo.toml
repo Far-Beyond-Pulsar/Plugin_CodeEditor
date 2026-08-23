@@ -17,8 +17,10 @@ builtin = []
 plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f91bbba2b90ebad0afa6b9940ecd52da0430e326" }
 
 # UI dependencies
-gpui-ce = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI", rev = "98e312efa8601b1244215c79aac88acb5e169e03" }
-ui      = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI-Component", rev = "ccbab31e4e2364ef52efcb61c98c37a5d8cc79e1", features = ["tree-sitter-languages"] }
+# NOTE: gpui-ce rev must match the rev Pulsar-Native@f91bbba pins internally,
+# and ui must match WGPUI-Component's own gpui-ce pin, or type mismatches occur.
+gpui-ce = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI", rev = "faf94adae251716ba5d6f3b510335395b19365e8" }
+ui      = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI-Component", rev = "07a0910b7f0004c31dfc7bab8ece03158636c541", features = ["tree-sitter-languages"] }
 ui_common       = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f91bbba2b90ebad0afa6b9940ecd52da0430e326" }
 ui_types_common = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f91bbba2b90ebad0afa6b9940ecd52da0430e326" }
 
@@ -48,3 +50,6 @@ similar = "2.2"
 
 # JSON schema derive
 schemars = { version = "1.2", features = ["derive"] }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
