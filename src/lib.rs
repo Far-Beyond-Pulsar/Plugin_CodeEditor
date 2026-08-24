@@ -53,7 +53,7 @@ impl EditorPlugin for ScriptEditorPlugin {
         PluginMetadata {
             id: PluginId::new("com.pulsar.script-editor"),
             name: "Script Editor".into(),
-            version: "0.1.0".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
             author: "Pulsar Team".into(),
             description: "Professional code editor with LSP support for multiple programming languages".into(),
         }

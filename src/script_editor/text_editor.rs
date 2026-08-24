@@ -5,12 +5,15 @@ use ui::{
     h_flex,
     input::{InputEvent, InputState, TabSize, TextInput},
     resizable::{h_resizable, resizable_panel, ResizableState},
-    v_flex, ActiveTheme as _, IconName, Sizable as _, StyledExt,
+    text::TextView,
+    v_flex, ActiveTheme as _, ContextModal as _, Icon, IconName, Sizable as _, StyledExt,
 };
 
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
+
+use super::languages;
 
 use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
 
@@ -122,6 +125,26 @@ impl TextEditor {
                 }
             }
         }
+    }
+
+    const MARKDOWN_PREVIEW_MAX_LINES: usize = 2000;
+
+    fn truncated_markdown_preview(content: &str) -> String {
+        let total_lines = content.lines().count();
+        if total_lines <= Self::MARKDOWN_PREVIEW_MAX_LINES {
+            return content.to_string();
+        }
+
+        let mut truncated = content
+            .lines()
+            .take(Self::MARKDOWN_PREVIEW_MAX_LINES)
+            .collect::<Vec<_>>()
+            .join("\n");
+        truncated.push_str(&format!(
+            "\n\n---\n\n*Preview truncated: showing the first {} of {total_lines} lines.*",
+            Self::MARKDOWN_PREVIEW_MAX_LINES
+        ));
+        truncated
     }
 
     /// Set the global rust analyzer manager.
@@ -329,7 +352,7 @@ impl TextEditor {
         }
 
         // Create an empty file in memory
-        let language = "text";
+        let language = languages::PLAINTEXT.id;
         let input_state = cx.new(|cx| {
             let mut state = InputState::new(window, cx)
                 .code_editor(language)
@@ -598,19 +621,31 @@ impl TextEditor {
 
         // Create editor state with optimal settings for large files
         let setup_start = Instant::now();
+        let language = languages::language_for_path(&path);
+        let highlight = languages::highlighting_enabled(lines_count);
+        if !highlight {
+            tracing::debug!(
+                "⚠️  Syntax highlighting disabled for large file ({} lines > {})",
+                lines_count,
+                languages::HIGHLIGHT_DISABLE_LINES
+            );
+        }
         let input_state = cx.new(|cx| {
-            let mut state = InputState::new(window, cx)
-                .code_editor(language)
+            let mut state = InputState::new(window, cx);
+            if highlight {
+                state = state.code_editor(language.id);
+            } else {
+                state = state.multi_line();
+            }
+            let mut state = state
                 .line_number(true)
-                .minimap(true) // Enable VSCode-style minimap scrollbar
+                .minimap(highlight) // Enable VSCode-style minimap scrollbar
                 .tab_size(TabSize {
                     tab_size: 4,
                     hard_tabs: false,
                 })
                 // Disable soft wrap for large files for better performance
-                // Files with more than 5k lines or 500KB get no wrapping
-                .soft_wrap(lines_count < 5_000 && file_size < 500_000)
-                .soft_wrap(false);
+                .soft_wrap(languages::should_soft_wrap(lines_count, file_size));
 
             // Set the content after creating the state
             state.set_value(&content, window, cx);
@@ -694,22 +729,44 @@ impl TextEditor {
                             // Note: We no longer auto-update markdown preview here
                             // User must click the refresh button to update preview
 
-                            // Notify rust-analyzer of the change
+                            // Notify rust-analyzer of the change (debounced:
+                            // full-document sync is expensive, so coalesce
+                            // bursts and only send the latest version).
                             if let Some(ref analyzer) = analyzer {
                                 let path = file.path.clone();
                                 let version = file.version;
-                                let content = file.input_state.read(cx).value().to_string();
+                                let analyzer = analyzer.clone();
 
-                                tracing::debug!("📝 File changed: {:?} (version {}), notifying rust-analyzer", path.file_name(), version);
-                                analyzer.update(cx, |analyzer, _cx| {
-                                    if let Err(e) = analyzer.did_change_file(&path, &content, version) {
-                                        tracing::error!("⚠️  Failed to notify rust-analyzer of file change: {}", e);
-                                    } else {
-                                        if version % 10 == 0 {  // Log every 10th change to avoid spam
-                                            tracing::debug!("✓ Notified rust-analyzer of change (version {})", version);
+                                tracing::debug!("📝 File changed: {:?} (version {}), scheduling debounced sync", path.file_name(), version);
+                                cx.spawn(async move |this, cx| {
+                                    const LSP_SYNC_DEBOUNCE: std::time::Duration =
+                                        std::time::Duration::from_millis(200);
+                                    cx.background_executor()
+                                        .timer(LSP_SYNC_DEBOUNCE)
+                                        .await;
+
+                                    this.update(cx, |this, cx| {
+                                        let file = this
+                                            .open_files
+                                            .iter()
+                                            .find(|f| f.path == path);
+                                        if file.map(|f| f.version) != Some(version) {
+                                            return; // Superseded by a newer edit.
                                         }
-                                    }
-                                });
+                                        if let Some(file) = file {
+                                            let content =
+                                                file.input_state.read(cx).value().to_string();
+                                            analyzer.update(cx, |analyzer, _cx| {
+                                                if let Err(e) = analyzer.did_change_file(
+                                                    &path, &content, version,
+                                                ) {
+                                                    tracing::error!("⚠️  Failed to notify rust-analyzer of file change: {}", e);
+                                                }
+                                            });
+                                        }
+                                    });
+                                })
+                                .detach();
                             } else {
                                 if file.version == 2 {  // Only log once to avoid spam
                                     tracing::debug!("⚠️  No rust-analyzer available for didChange");
@@ -794,27 +851,15 @@ impl TextEditor {
     }
 
     fn get_language_from_extension(&self, path: &PathBuf) -> String {
-        match path.extension().and_then(|ext| ext.to_str()) {
-            Some("rs") => "rust".to_string(),
-            Some("js") => "javascript".to_string(),
-            Some("ts") => "typescript".to_string(),
-            Some("py") => "python".to_string(),
-            Some("toml") => "toml".to_string(),
-            Some("json") => "json".to_string(),
-            Some("md") => "markdown".to_string(),
-            Some("html") => "html".to_string(),
-            Some("css") => "css".to_string(),
-            Some("go") => "go".to_string(),
-            Some("rb") => "ruby".to_string(),
-            Some("sql") => "sql".to_string(),
-            Some("log") => "text".to_string(),
-            Some("txt") => "text".to_string(),
-            Some("yaml") | Some("yml") => "yaml".to_string(),
-            Some("xml") => "xml".to_string(),
-            Some("c") | Some("h") => "c".to_string(),
-            Some("cpp") | Some("hpp") | Some("cc") => "cpp".to_string(),
-            _ => "text".to_string(),
-        }
+        languages::language_for_path(path).id.to_string()
+    }
+
+    /// Whether the currently active file has unsaved modifications.
+    fn current_file_dirty(&self) -> bool {
+        self.current_file_index
+            .and_then(|index| self.open_files.get(index))
+            .map(|file| file.is_modified)
+            .unwrap_or(false)
     }
 
     /// Get performance info about the current file
@@ -894,31 +939,81 @@ impl TextEditor {
         false
     }
 
-    pub fn close_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn close_current_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.current_file_index {
-            if let Some(open_file) = self.open_files.get(index) {
-                let path = open_file.path.clone();
-
-                // Emit event so rust-analyzer can be notified
-                cx.emit(TextEditorEvent::FileClosed { path: path.clone() });
-
-                tracing::debug!("❌ File closed: {:?}", path.file_name());
-
-                // Remove the file from open files
-                self.open_files.remove(index);
-
-                // Update current file index
-                if self.open_files.is_empty() {
-                    self.current_file_index = None;
-                } else if index >= self.open_files.len() {
-                    // If we removed the last file, select the new last file
-                    self.current_file_index = Some(self.open_files.len() - 1);
-                }
-                // else: keep current index (will now point to the next file)
-
-                cx.notify();
-            }
+            self.request_close_file(index, window, cx);
         }
+    }
+
+    /// Close the file at `index`, prompting for confirmation when it has
+    /// unsaved changes.
+    fn request_close_file(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let (modified, name) = match self.open_files.get(index) {
+            Some(file) => (
+                file.is_modified,
+                file.path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("untitled")
+                    .to_string(),
+            ),
+            None => return,
+        };
+
+        if !modified {
+            self.close_file(index, window, cx);
+            return;
+        }
+
+        let entity = cx.entity().downgrade();
+        let title = t!("CodeEditor.UnsavedTitle").to_string();
+        let message = t!("CodeEditor.UnsavedMessage", name = name).to_string();
+
+        window.open_modal(cx, move |modal, _window, _cx| {
+            let entity = entity.clone();
+            modal
+                .title(title.clone())
+                .child(div().text_sm().child(message.clone()))
+                .footer(move |_, _, _, _| {
+                    vec![
+                        Button::new("save-and-close")
+                            .label(t!("CodeEditor.SaveAndClose").to_string())
+                            .primary()
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, window, cx| {
+                                    if let Some(entity) = entity.upgrade() {
+                                        entity.update(cx, |editor, cx| {
+                                            if editor.save_current_file(window, cx) {
+                                                editor.close_file(index, window, cx);
+                                            }
+                                        });
+                                    }
+                                    window.close_modal(cx);
+                                }
+                            }),
+                        Button::new("discard-close")
+                            .label(t!("CodeEditor.Discard").to_string())
+                            .danger()
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, window, cx| {
+                                    if let Some(entity) = entity.upgrade() {
+                                        entity.update(cx, |editor, cx| {
+                                            editor.close_file(index, window, cx);
+                                        });
+                                    }
+                                    window.close_modal(cx);
+                                }
+                            }),
+                        Button::new("cancel-close")
+                            .label(t!("CodeEditor.Cancel").to_string())
+                            .on_click(|_, window, cx| {
+                                window.close_modal(cx);
+                            }),
+                    ]
+                })
+        });
     }
 
     /// Navigate to a specific line and column in the current file
@@ -1079,9 +1174,19 @@ impl TextEditor {
             false
         };
 
+        let separator = || {
+            div()
+                .w_px()
+                .h_4()
+                .mx_1()
+                .bg(cx.theme().border)
+                .rounded_full()
+        };
+
         h_flex()
             .w_full()
-            .p_2()
+            .px_2()
+            .py_1p5()
             .bg(cx.theme().secondary)
             .border_b_1()
             .border_color(cx.theme().border)
@@ -1089,7 +1194,8 @@ impl TextEditor {
             .items_center()
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_1()
+                    .items_center()
                     .child(
                         Button::new("new_file")
                             .icon(IconName::Plus)
@@ -1100,7 +1206,17 @@ impl TextEditor {
                                 this.create_new_file(window, cx);
                             })),
                     )
-                    .child(
+                    .child(if self.current_file_dirty() {
+                        Button::new("save")
+                            .icon(IconName::FloppyDisk)
+                            .tooltip(t!("CodeEditor.Save").to_string())
+                            .ghost()
+                            .small()
+                            .text_color(cx.theme().accent)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.save_current_file(window, cx);
+                            }))
+                    } else {
                         Button::new("save")
                             .icon(IconName::FloppyDisk)
                             .tooltip(t!("CodeEditor.Save").to_string())
@@ -1108,8 +1224,9 @@ impl TextEditor {
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.save_current_file(window, cx);
-                            })),
-                    )
+                            }))
+                    })
+                    .child(separator())
                     .children(if is_markdown_file {
                         Some(
                             Button::new("refresh_preview")
@@ -1144,44 +1261,41 @@ impl TextEditor {
                                 this.show_replace_dialog(window, cx);
                             })),
                     )
-                    .child(if self.show_performance_stats {
-                        Button::new("toggle_stats")
-                            .icon(IconName::Search)
-                            .tooltip(t!("CodeEditor.PerfStats").to_string())
-                            .small()
-                            .with_variant(ui::button::ButtonVariant::Primary)
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                this.show_performance_stats = !this.show_performance_stats;
-                                cx.notify();
-                            }))
-                    } else {
-                        Button::new("toggle_stats")
-                            .icon(IconName::Search)
+                    .child(separator())
+                    .child({
+                        let mut stats = Button::new("toggle_stats")
+                            .icon(IconName::Activity)
                             .tooltip(t!("CodeEditor.PerfStats").to_string())
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _window, cx| {
                                 this.show_performance_stats = !this.show_performance_stats;
                                 cx.notify();
-                            }))
+                            }));
+                        if self.show_performance_stats {
+                            stats = stats.text_color(cx.theme().accent);
+                        }
+                        stats
                     }),
             )
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_1()
+                    .items_center()
                     .child(
                         Button::new("run")
-                            .icon(IconName::ArrowRight)
+                            .icon(IconName::Play)
                             .tooltip(t!("CodeEditor.RunScript").to_string())
                             .ghost()
                             .small()
+                            .text_color(cx.theme().success)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.run_current_file(window, cx);
                             })),
                     )
                     .child(
                         Button::new("debug")
-                            .icon(IconName::Search)
+                            .icon(IconName::Bug)
                             .tooltip(t!("CodeEditor.DebugScript").to_string())
                             .ghost()
                             .small()
@@ -1248,16 +1362,17 @@ impl TextEditor {
                                                 features: gpui::FontFeatures::default(),
                                                 fallbacks: Some(gpui::FontFallbacks::from_fonts(vec!["monospace".to_string()])),
                                             })
-                                            // TODO: Re-enable markdown rendering when performance is improved
-                                            //.child(
-                                            //    TextView::markdown(
-                                            //        "md-viewer",
-                                            //        preview_content.clone(),
-                                            //        window,
-                                            //        cx,
-                                            //    )
-                                            //    .selectable()
-                                            //)
+                                            .child({
+                                                let preview_content =
+                                                    Self::truncated_markdown_preview(preview_content);
+                                                TextView::markdown(
+                                                    "md-viewer",
+                                                    preview_content,
+                                                    window,
+                                                    cx,
+                                                )
+                                                .selectable()
+                                            })
                                     } else {
                                         div()
                                             .id("markdown-preview-panel")
@@ -1331,12 +1446,18 @@ impl TextEditor {
             .child(
                 v_flex()
                     .items_center()
-                    .gap_4()
+                    .gap_3()
+                    .child(
+                        Icon::new(IconName::CodeBrackets)
+                            .size(px(56.))
+                            .text_color(cx.theme().muted_foreground)
+                            .opacity(0.5),
+                    )
                     .child(
                         div()
                             .text_2xl()
                             .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(cx.theme().foreground)
                             .child(t!("CodeEditor.Welcome").to_string()),
                     )
                     .child(
@@ -1348,12 +1469,13 @@ impl TextEditor {
                     )
                     .child(
                         h_flex()
-                            .gap_3()
+                            .gap_2()
                             .mt_4()
                             .child(
                                 Button::new("new_file_welcome")
                                     .label(t!("CodeEditor.NewFile").to_string())
                                     .icon(IconName::Plus)
+                                    .ghost()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.create_new_file(window, cx);
                                     })),
@@ -1362,7 +1484,7 @@ impl TextEditor {
                                 Button::new("open_folder_welcome")
                                     .label(t!("CodeEditor.OpenFolder").to_string())
                                     .icon(IconName::FolderOpen)
-                                    .with_variant(ui::button::ButtonVariant::Primary)
+                                    .primary()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.open_folder_dialog(window, cx);
                                     })),
@@ -1383,23 +1505,31 @@ impl TextEditor {
                     .to_string();
                 let language = self.get_language_from_extension(&open_file.path);
 
-                // Get cache statistics
+                // Get cache statistics and live cursor position
                 let state = open_file.input_state.read(cx);
                 let cache_stats = state.line_cache().stats();
                 let cache_size = state.line_cache().len();
+                let cursor = state.cursor_position();
+                let cursor_str = format!("Ln {}, Col {}", cursor.line + 1, cursor.character + 1);
+
+                let dirty_marker = if open_file.is_modified { "● " } else { "" };
 
                 let file_size_kb = open_file.file_size / 1024;
                 let file_info_str = if file_size_kb > 1024 {
                     format!(
-                        "{} | {} lines | {:.1} MB",
+                        "{}{} | {} lines | {:.1} MB",
+                        dirty_marker,
                         filename,
                         open_file.lines_count,
                         file_size_kb as f64 / 1024.0
                     )
                 } else {
                     format!(
-                        "{} | {} lines | {} KB",
-                        filename, open_file.lines_count, file_size_kb
+                        "{}{} | {} lines | {} KB",
+                        dirty_marker,
+                        filename,
+                        open_file.lines_count,
+                        file_size_kb
                     )
                 };
 
@@ -1416,43 +1546,76 @@ impl TextEditor {
                     format!("Cache: {} lines cached", cache_size)
                 };
 
-                ((file_info_str, language), cache_info_str)
+                (
+                    (file_info_str, language, cursor_str),
+                    cache_info_str,
+                )
             } else {
-                (("No file".to_string(), "".to_string()), "".to_string())
+                (
+                    ("No file".to_string(), "".to_string(), "".to_string()),
+                    "".to_string(),
+                )
             }
         } else {
-            (("No file".to_string(), "".to_string()), "".to_string())
+            (
+                ("No file".to_string(), "".to_string(), "".to_string()),
+                "".to_string(),
+            )
+        };
+
+        let dirty = self.current_file_dirty();
+        let v_sep = || {
+            div()
+                .w_px()
+                .h_3()
+                .bg(cx.theme().border)
+                .rounded_full()
         };
 
         h_flex()
             .w_full()
             .min_h_6()
-            .px_4()
+            .px_3()
             .py_1()
-            .bg(cx.theme().accent)
+            .bg(cx.theme().secondary)
             .border_t_1()
             .border_color(cx.theme().border)
             .justify_between()
             .items_center()
             .text_xs()
-            .text_color(cx.theme().accent_foreground)
+            .text_color(cx.theme().muted_foreground)
             .child(
                 h_flex()
-                    .gap_4()
+                    .gap_2p5()
+                    .items_center()
+                    .children(dirty.then(|| {
+                        div()
+                            .size_1p5()
+                            .rounded_full()
+                            .bg(cx.theme().warning)
+                            .into_any_element()
+                    }))
                     .child(file_info.0)
+                    .child(v_sep())
                     .child(t!("CodeEditor.Utf8").to_string())
                     .child(t!("CodeEditor.Lf").to_string()),
             )
             .child({
-                let mut flex = h_flex().gap_4();
+                let mut flex = h_flex().gap_2p5().items_center();
 
                 if self.show_performance_stats {
-                    flex = flex.child(cache_info.clone());
+                    flex = flex.child(cache_info.clone()).child(v_sep());
                 }
 
-                flex.child(t!("CodeEditor.LnCol").to_string())
+                flex.child(file_info.2)
+                    .child(v_sep())
                     .child(t!("CodeEditor.Spaces4").to_string())
-                    .child(file_info.1)
+                    .child(v_sep())
+                    .child(
+                        div()
+                            .text_color(cx.theme().foreground)
+                            .child(file_info.1),
+                    )
             })
     }
 
@@ -1548,29 +1711,7 @@ impl TextEditor {
             }
         } else {
             // Detect language from file extension for syntax highlighting
-            let language = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| match ext {
-                    "rs" => "rust",
-                    "js" | "jsx" => "javascript",
-                    "ts" | "tsx" => "typescript",
-                    "py" => "python",
-                    "go" => "go",
-                    "c" | "h" => "c",
-                    "cpp" | "cc" | "cxx" | "hpp" => "cpp",
-                    "java" => "java",
-                    "json" => "json",
-                    "toml" => "toml",
-                    "yaml" | "yml" => "yaml",
-                    "md" => "markdown",
-                    "html" | "htm" => "html",
-                    "css" => "css",
-                    "xml" => "xml",
-                    "sh" | "bash" => "bash",
-                    _ => "plaintext",
-                })
-                .unwrap_or("plaintext");
+            let language = languages::language_for_path(&path).id;
 
             // Create new file entry with provided content
             let input_state = cx.new(|cx| {

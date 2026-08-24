@@ -1,10 +1,12 @@
 mod autocomplete_integration;
 mod file_explorer;
+pub mod languages;
 pub mod text_editor;
 mod workspace_panels;
 
 pub use autocomplete_integration::*;
 pub use file_explorer::FileExplorer;
+pub use languages::*;
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use workspace_panels::*;
 
@@ -683,26 +685,34 @@ impl Render for ScriptEditor {
                                 div()
                                     .flex_1()
                                     .px_3()
-                                    .py_2()
+                                    .py_1p5()
                                     .border_r_1()
                                     .border_color(cx.theme().border)
                                     .child(
                                         div()
                                             .text_xs()
-                                            .font_semibold()
+                                            .font_medium()
+                                            .tracking_wider()
                                             .text_color(cx.theme().danger)
-                                            .child(t!("CodeEditor.BeforeLocal").to_string()),
+                                            .child(
+                                                t!("CodeEditor.BeforeLocal")
+                                                    .to_string()
+                                                    .to_uppercase(),
+                                            ),
                                     ),
                             )
-                            .child(
-                                div().flex_1().px_3().py_2().child(
-                                    div()
-                                        .text_xs()
-                                        .font_semibold()
-                                        .text_color(cx.theme().success)
-                                        .child(t!("CodeEditor.AfterRemote").to_string()),
-                                ),
-                            ),
+                            .child(div().flex_1().px_3().py_1p5().child(
+                                div()
+                                    .text_xs()
+                                    .font_medium()
+                                    .tracking_wider()
+                                    .text_color(cx.theme().success)
+                                    .child(
+                                        t!("CodeEditor.AfterRemote")
+                                            .to_string()
+                                            .to_uppercase(),
+                                    ),
+                            )),
                     )
                     .child(
                         // Side-by-side editors

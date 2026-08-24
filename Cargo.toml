@@ -51,5 +51,15 @@ similar = "2.2"
 # JSON schema derive
 schemars = { version = "1.2", features = ["derive"] }
 
+# Local development override: perf fixes are made directly on the sibling
+# clone (branch perf/input-hot-paths @ 07a0910) until merged upstream.
+[patch."https://github.com/Far-Beyond-Pulsar/WGPUI-Component"]
+ui = { path = "../WGPUI-Component/crates/ui" }
+
+[profile.dev.package."*"]
+# Keep our crate fast to compile, but optimize heavy dependencies
+# (gpui/wgpu/tree-sitter/simd) even in dev builds.
+opt-level = 2
+
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

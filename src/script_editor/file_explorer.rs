@@ -7,8 +7,10 @@ use ui::{
     button::{Button, ButtonVariants as _},
     context_menu::ContextMenuExt,
     h_flex,
+    v_flex,
+    input::{InputEvent, InputState, TextInput},
     scroll::Scrollbar,
-    ActiveTheme as _, StyledExt, Sizable as _,
+    ActiveTheme as _, StyledExt, Sizable as _, Size,
     IconName, Icon,
 };
 use serde::Deserialize;
@@ -26,6 +28,7 @@ actions!(
         CopyFilePath,
         CopyRelativePath,
         RevealInFileManager,
+        CancelRename,
     ]
 );
 
@@ -83,12 +86,21 @@ pub struct FileExplorer {
     clipboard_operation: Option<ClipboardOperation>,
     /// Path being renamed (for inline rename)
     renaming_path: Option<PathBuf>,
+    /// Inline text input for the active rename session
+    rename_input: Option<Entity<InputState>>,
+    /// Subscription to the rename input's events (Enter/Blur/Change)
+    rename_subscription: Option<Subscription>,
+    /// Whether the pending rename name failed validation (red border hint)
+    rename_invalid: bool,
     /// Files that have diffs (for diff mode highlighting)
     diff_files: HashSet<PathBuf>,
 }
 
 impl FileExplorer {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Escape cancels an active inline rename (the input's own escape handler propagates here)
+        cx.bind_keys([KeyBinding::new("escape", CancelRename, Some("FileExplorer"))]);
+
         Self {
             focus_handle: cx.focus_handle(),
             project_root: None,
@@ -106,6 +118,9 @@ impl FileExplorer {
             clipboard_path: None,
             clipboard_operation: None,
             renaming_path: None,
+            rename_input: None,
+            rename_subscription: None,
+            rename_invalid: false,
             diff_files: HashSet::new(),
         }
     }
@@ -490,9 +505,183 @@ impl FileExplorer {
         cx.notify();
     }
 
-    fn start_rename(&mut self, path: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
-        self.renaming_path = Some(path);
+    fn start_rename(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        // Bail out gracefully when the entry vanished before the action ran
+        if !path.exists() {
+            tracing::warn!("⚠️ Rename aborted, path no longer exists: {:?}", path);
+            self.finish_rename_session(cx);
+            return;
+        }
+
+        // Close any in-flight rename session first
+        self.finish_rename_session(cx);
+
+        let initial_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_value(initial_name.as_str(), window, cx);
+            state.focus(window, cx);
+            state
+        });
+
+        let subscription = cx.subscribe(
+            &input,
+            |this: &mut Self,
+             _: Entity<InputState>,
+             event: &InputEvent,
+             cx: &mut Context<Self>| {
+                match event {
+                    InputEvent::PressEnter { .. } => this.commit_rename(cx),
+                    InputEvent::Blur => {
+                        tracing::debug!("✗ Rename cancelled (input lost focus)");
+                        this.finish_rename_session(cx);
+                    }
+                    InputEvent::Change => {
+                        if this.rename_invalid {
+                            this.rename_invalid = false;
+                            cx.notify();
+                        }
+                    }
+                    _ => {}
+                }
+            },
+        );
+
+        self.rename_input = Some(input);
+        self.rename_subscription = Some(subscription);
+        self.renaming_path = Some(path.clone());
+        self.scroll_to_entry(&path, cx);
         cx.notify();
+    }
+
+    /// Tear down the current rename session (drops input + subscription, no fs change)
+    fn finish_rename_session(&mut self, cx: &mut Context<Self>) {
+        self.rename_subscription.take();
+        self.rename_input.take();
+        self.renaming_path = None;
+        self.rename_invalid = false;
+        cx.notify();
+    }
+
+    fn commit_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(old_path) = self.renaming_path.clone() else {
+            return;
+        };
+        let raw_value = self
+            .rename_input
+            .as_ref()
+            .map(|input| input.read(cx).value().to_string())
+            .unwrap_or_default();
+        let new_name = raw_value.trim().to_string();
+
+        if !Self::is_valid_entry_name(&new_name) {
+            self.rename_invalid = true;
+            tracing::warn!("⚠️ Invalid name for rename, keeping editor open: {:?}", new_name);
+            cx.notify();
+            return;
+        }
+
+        if old_path
+            .file_name()
+            .map(|name| name.to_string_lossy().as_ref() == new_name.as_str())
+            .unwrap_or(false)
+        {
+            tracing::debug!("Rename: name unchanged, closing editor");
+            self.finish_rename_session(cx);
+            return;
+        }
+
+        let was_directory = old_path.is_dir();
+        let new_path = match old_path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.join(&new_name),
+            _ => PathBuf::from(&new_name),
+        };
+
+        match fs::rename(&old_path, &new_path) {
+            Ok(_) => {
+                tracing::debug!("✓ Renamed: {:?} -> {:?}", old_path, new_path);
+                if was_directory {
+                    // Keep expansion state under the new folder path
+                    if let Some(expanded) = self.expanded_folders.remove(&old_path) {
+                        self.expanded_folders.insert(new_path.clone(), expanded);
+                    }
+                }
+                if self.selected_file.as_ref() == Some(&old_path) {
+                    self.selected_file = Some(new_path.clone());
+                }
+                self.finish_rename_session(cx);
+                self.refresh_file_tree(cx);
+                self.scroll_to_entry(&new_path, cx);
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to rename {:?} -> {:?}: {}",
+                    old_path,
+                    new_path,
+                    e
+                );
+                self.finish_rename_session(cx);
+            }
+        }
+    }
+
+    /// A name is valid when non-empty, free of path separators, and not a dot segment
+    fn is_valid_entry_name(name: &str) -> bool {
+        !name.is_empty()
+            && name != "."
+            && name != ".."
+            && !name.contains('/')
+            && !name.contains('\\')
+    }
+
+    fn on_cancel_rename(
+        &mut self,
+        _: &CancelRename,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.renaming_path.is_some() {
+            tracing::debug!("✗ Rename cancelled");
+            self.finish_rename_session(cx);
+        } else {
+            cx.propagate();
+        }
+    }
+
+    /// Inline rename editor rendered in place of the entry's label
+    fn render_inline_rename(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(input) = self.rename_input.clone() else {
+            return div().into_any_element();
+        };
+
+        h_flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .px_1()
+            // Reserve the border space up front so validation state changes don't shift layout
+            .border_1()
+            .border_color(if self.rename_invalid {
+                cx.theme().danger
+            } else {
+                cx.theme().transparent
+            })
+            .rounded_md()
+            .child(TextInput::new(&input).with_size(Size::Small))
+            // Swallow clicks inside the editor so outer handlers don't cancel the rename
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|_, _, _, cx| cx.stop_propagation()),
+            )
+            .on_mouse_down(
+                gpui::MouseButton::Right,
+                cx.listener(|_, _, _, cx| cx.stop_propagation()),
+            )
+            .into_any_element()
     }
 
     fn copy_path_to_clipboard(&self, path: &Path, cx: &mut App) {
@@ -609,8 +798,8 @@ impl FileExplorer {
         if size_changed {
             self.last_window_size = Some(window_size);
             // Estimate viewport bounds based on window size
-            // Account for header (48px) and footer (36px) = 84px total chrome
-            let estimated_height = (window_size.height - px(84.0)).max(px(200.0));
+            // Account for header (~37px) and footer (~31px) chrome
+            let estimated_height = (window_size.height - px(68.0)).max(px(200.0));
             let estimated_width = px(250.0); // Typical sidebar width
             
             self.last_viewport_bounds = Some(Bounds {
@@ -714,6 +903,7 @@ impl FileExplorer {
 
     fn render_file_item(&self, entry: &FileEntry, cx: &mut Context<Self>) -> impl IntoElement {
         let is_selected = self.selected_file.as_ref() == Some(&entry.path);
+        let is_renaming = self.renaming_path.as_ref() == Some(&entry.path);
         let path = entry.path.clone();
         let is_directory = entry.is_directory;
         let icon = self.get_file_icon(entry);
@@ -745,6 +935,7 @@ impl FileExplorer {
 
         div()
             .id(item_id)
+            .relative()
             .flex()
             .items_center()
             .gap_2()
@@ -752,23 +943,39 @@ impl FileExplorer {
             .pl(indent + px(12.0))
             .pr_3()
             .rounded_md()
-            .when(is_selected, |style| style.bg(cx.theme().accent))
-            .when(!is_selected && is_clickable, |style| {
-                style.hover(|style| style.bg(cx.theme().accent.opacity(0.1)))
+            .when(is_selected, |style| style.bg(cx.theme().list_active))
+            .when(!is_selected && is_clickable && !should_grey, |style| {
+                style.hover(|style| style.bg(cx.theme().list_hover))
             })
             .when(is_clickable, |style| style.cursor_pointer())
             .when(!is_clickable, |style| style.cursor_default())
-            .child(Icon::new(icon).size_4().when(should_grey, |icon| icon.text_color(cx.theme().muted_foreground)))
-            .child(
+            .when(should_grey, |style| style.opacity(0.45))
+            .child(Icon::new(icon).size_4())
+            .child(if is_renaming {
+                self.render_inline_rename(cx)
+            } else {
                 div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
                     .text_sm()
-                    .when(should_grey, |style| style.italic())
-                    .when(is_selected, |style| style.text_color(cx.theme().accent_foreground))
-                    .when(!is_selected && !should_grey, |style| style.text_color(cx.theme().foreground))
-                    .when(!is_selected && should_grey, |style| style.text_color(cx.theme().muted_foreground))
+                    .text_color(cx.theme().foreground)
                     .child(entry.name.clone())
-            )
-            .when(is_clickable, |div| {
+                    .into_any_element()
+            })
+            // Accent bar marking the selected entry
+            .when(is_selected && !is_renaming, |row| {
+                row.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(2.0))
+                        .bg(cx.theme().accent)
+                )
+            })
+            .when(is_clickable && !is_renaming, |div| {
                 div.on_mouse_down(gpui::MouseButton::Left, {
                     let path = path.clone();
                     let is_dir = is_directory;
@@ -785,48 +992,52 @@ impl FileExplorer {
                 })
             })
             // Select the item on right-click to ensure context menu actions work on it
-            .on_mouse_down(gpui::MouseButton::Right, {
-                let path = path.clone();
-                cx.listener(move |this, _, window, cx| {
-                    this.select_file(path.clone(), window, cx);
+            .when(!is_renaming, |div| {
+                div.on_mouse_down(gpui::MouseButton::Right, {
+                    let path = path.clone();
+                    cx.listener(move |this, _, window, cx| {
+                        this.select_file(path.clone(), window, cx);
+                    })
                 })
             })
-            .context_menu({
-                let path_for_menu = path.clone();
-                let path_str = path_for_menu.to_string_lossy().to_string();
-                move |menu, _window, _cx| {
-                    let mut menu = menu;
+            .when(!is_renaming, |div| {
+                div.context_menu({
+                    let path_for_menu = path.clone();
+                    let path_str = path_for_menu.to_string_lossy().to_string();
+                    move |menu, _window, _cx| {
+                        let mut menu = menu;
 
-                    // File/Folder specific actions
-                    if is_directory {
+                        // File/Folder specific actions
+                        if is_directory {
+                            menu = menu
+                                .menu("New File Here", Box::new(NewFileHere { path: path_str.clone() }))
+                                .menu("New Folder Here", Box::new(NewFolderHere { path: path_str.clone() }))
+                                .separator();
+                        }
+
+                        // Common actions
                         menu = menu
-                            .menu("New File Here", Box::new(NewFileHere { path: path_str.clone() }))
-                            .menu("New Folder Here", Box::new(NewFolderHere { path: path_str.clone() }))
-                            .separator();
+                            .menu("Cut", Box::new(CutFile))
+                            .menu("Copy", Box::new(CopyFile));
+
+                        // Paste (only if we have something in clipboard)
+                        if has_clipboard {
+                            menu = menu.menu("Paste", Box::new(PasteFile));
+                        }
+
+                        menu = menu
+                            .separator()
+                            .menu(t!("CodeEditor.Rename").to_string(), Box::new(RenameFile))
+                            .menu("Delete", Box::new(DeleteFile))
+                            .separator()
+                            .menu("Copy Path", Box::new(CopyFilePath))
+                            .menu("Copy Relative Path", Box::new(CopyRelativePath))
+                            .separator()
+                            .menu("Reveal in File Manager", Box::new(RevealInFileManager));
+
+                        menu
                     }
-
-                    // Common actions
-                    menu = menu
-                        .menu("Cut", Box::new(CutFile))
-                        .menu("Copy", Box::new(CopyFile));
-
-                    // Paste (only if we have something in clipboard)
-                    if has_clipboard {
-                        menu = menu.menu("Paste", Box::new(PasteFile));
-                    }
-
-                    menu = menu
-                        .separator()
-                        .menu("Rename", Box::new(RenameFile))
-                        .menu("Delete", Box::new(DeleteFile))
-                        .separator()
-                        .menu("Copy Path", Box::new(CopyFilePath))
-                        .menu("Copy Relative Path", Box::new(CopyRelativePath))
-                        .separator()
-                        .menu("Reveal in File Manager", Box::new(RevealInFileManager));
-
-                    menu
-                }
+                })
             })
     }
     
@@ -918,6 +1129,7 @@ impl Render for FileExplorer {
             .on_action(cx.listener(Self::on_reveal_in_file_manager))
             .on_action(cx.listener(Self::on_new_file_here))
             .on_action(cx.listener(Self::on_new_folder_here))
+            .on_action(cx.listener(Self::on_cancel_rename))
             .size_full()
             .flex()
             .flex_col()
@@ -926,24 +1138,24 @@ impl Render for FileExplorer {
                 div()
                     .w_full()
                     .px_4()
-                    .py_3()
+                    .py_2()
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().sidebar_border)
                     .child(
                         h_flex()
                             .w_full()
                             .justify_between()
-                            .items_center()
                             .child(
                                 div()
-                                    .text_sm()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child(t!("CodeEditor.Explorer").to_string())
+                                    .text_xs()
+                                    .font_medium()
+                                    .tracking_wider()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!("CodeEditor.Explorer").to_string().to_uppercase())
                             )
                             .child(
                                 h_flex()
-                                    .gap_1()
+                                    .gap_0p5()
                                     .child(
                                         Button::new("new_file")
                                             .icon(IconName::Plus)
@@ -997,26 +1209,55 @@ impl Render for FileExplorer {
                     .flex_1()
                     .overflow_hidden()
                     .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
+                    // Clicking anywhere else in the tree cancels an active rename
+                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        if this.renaming_path.is_some() {
+                            this.finish_rename_session(cx);
+                        }
+                    }))
+                    .on_mouse_down(gpui::MouseButton::Right, cx.listener(|this, _, _, cx| {
+                        if this.renaming_path.is_some() {
+                            this.finish_rename_session(cx);
+                        }
+                    }))
                     .when(file_tree_empty, |content| {
                         content.child(
-                            div()
-                                .p_4()
+                            v_flex()
+                                .size_full()
+                                .items_center()
+                                .justify_center()
+                                .gap_3()
+                                .child(
+                                    Icon::new(IconName::FolderOpen)
+                                        .size_8()
+                                        .text_color(cx.theme().muted_foreground.opacity(0.6))
+                                )
                                 .child(
                                     div()
-                                        .flex()
-                                        .items_center()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(t!("CodeEditor.ExplorerEmptyHint").to_string())
+                                )
+                                .child(
+                                    h_flex()
                                         .gap_2()
                                         .px_3()
-                                        .py_2()
+                                        .py_1p5()
                                         .rounded_md()
-                                        .hover(|style| style.bg(cx.theme().accent.opacity(0.1)))
+                                        .border_1()
+                                        .border_color(cx.theme().border)
                                         .cursor_pointer()
-                                        .child(Icon::new(IconName::FolderOpen).size_4().text_color(cx.theme().muted_foreground))
+                                        .hover(|style| style.bg(cx.theme().list_hover))
+                                        .child(
+                                            Icon::new(IconName::FolderOpen)
+                                                .size_4()
+                                                .text_color(cx.theme().foreground)
+                                        )
                                         .child(
                                             div()
                                                 .text_sm()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(t!("CodeEditor.NoFolderOpened").to_string())
+                                                .text_color(cx.theme().foreground)
+                                                .child(t!("CodeEditor.OpenFolder").to_string())
                                         )
                                         .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
                                             if let Ok(cwd) = std::env::current_dir() {
@@ -1037,18 +1278,33 @@ impl Render for FileExplorer {
                     div()
                         .w_full()
                         .px_4()
-                        .py_2()
+                        .py_1p5()
                         .border_t_1()
-                        .border_color(cx.theme().border)
+                        .border_color(cx.theme().sidebar_border)
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap_1p5()
                                 .child(
-                                    root.file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .to_string()
+                                    Icon::new(IconName::FolderOpen)
+                                        .size_3()
+                                        .flex_none()
+                                        .text_color(cx.theme().muted_foreground)
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(
+                                            root.file_name()
+                                                .unwrap_or_default()
+                                                .to_string_lossy()
+                                                .to_string()
+                                        )
                                 )
                         )
                 )

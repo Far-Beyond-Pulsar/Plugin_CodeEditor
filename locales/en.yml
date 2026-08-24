@@ -6,6 +6,8 @@ CodeEditor.NewFolder: New Folder
 CodeEditor.Refresh: Refresh
 CodeEditor.OpenFolder: Open Folder
 CodeEditor.NoFolderOpened: No folder opened
+CodeEditor.ExplorerEmptyHint: Open a folder to browse your files
+CodeEditor.Rename: Rename
 CodeEditor.ScriptEditor: Script Editor
 CodeEditor.BeforeLocal: BEFORE (Local)
 CodeEditor.AfterRemote: AFTER (Remote)
@@ -26,3 +28,8 @@ CodeEditor.Lf: LF
 CodeEditor.LnCol: Ln 1, Col 1
 CodeEditor.Spaces4: "Spaces: 4"
 CodeEditor.Loading: Loading...
+CodeEditor.UnsavedTitle: Unsaved Changes
+CodeEditor.UnsavedMessage: '%{name} has unsaved changes. Save before closing?'
+CodeEditor.SaveAndClose: Save & Close
+CodeEditor.Discard: Discard
+CodeEditor.Cancel: Cancel

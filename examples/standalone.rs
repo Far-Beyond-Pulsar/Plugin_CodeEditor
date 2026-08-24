@@ -137,6 +137,23 @@ impl Render for StandaloneApp {
     }
 }
 
+/// Make a path absolute without the Windows `\\?\` verbatim prefix, which
+/// confuses external tools like rust-analyzer.
+fn normalize_path(path: PathBuf) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(&path)
+    };
+    let text = absolute.as_os_str().to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(stripped) => PathBuf::from(stripped.to_string()),
+        None => absolute,
+    }
+}
+
 fn main() {
     let mut fullscreen = false;
     let mut wants_help = false;
@@ -165,9 +182,9 @@ fn main() {
     let project_root = positionals
         .next()
         .or_else(|| std::env::current_dir().ok())
-        .map(|path| path.canonicalize().unwrap_or(path))
+        .map(normalize_path)
         .unwrap_or_else(|| PathBuf::from("."));
-    let files_to_open: Vec<PathBuf> = positionals.map(|p| p.canonicalize().unwrap_or(p)).collect();
+    let files_to_open: Vec<PathBuf> = positionals.map(normalize_path).collect();
 
     Application::new()
         .with_assets(ui::assets::Assets)
