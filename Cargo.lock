@@ -3521,6 +3521,7 @@ dependencies = [
  "helio-pass-object-batch",
  "helio-pass-shadow-matrix",
  "pulsar_scenedb",
+ "twox-hash",
  "wgpu",
 ]
 
@@ -11792,15 +11793,15 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "pbgc"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "psgc"
 version = "0.1.0"
 
 [[patch.unused]]
 name = "wgsl_std"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "pbgc"
 version = "0.1.0"
 
 [[patch.unused]]

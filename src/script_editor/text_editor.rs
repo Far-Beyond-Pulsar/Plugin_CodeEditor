@@ -1,5 +1,5 @@
-use rust_i18n::t;
 use gpui::*;
+use rust_i18n::t;
 use ui::{
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -362,7 +362,10 @@ impl TextEditor {
                     tab_size: 4,
                     hard_tabs: false,
                 })
-                .soft_wrap(true);
+                // Source editing defaults to fixed-height display rows so
+                // the compositor-backed viewport can shift its retained
+                // surface instead of repainting per wheel tick.
+                .soft_wrap(false);
 
             state.set_value("", window, cx);
             state
@@ -1318,90 +1321,87 @@ impl TextEditor {
                         .state(self.markdown_split_state.clone())
                         .child(
                             // Left panel: Text editor for editing markdown
-                            resizable_panel()
-                                .size(px(400.))
-                                .child(
-                                    div()
-                                        .size_full()
-                                        .overflow_hidden()
-                                        .border_r_1()
-                                        .border_color(cx.theme().border)
-                                        .child(
-                                            TextInput::new(&open_file.input_state)
-                                                .h_full()
-                                                .w_full()
-                                                .font_family("JetBrains Mono")
-                                                .font(gpui::Font {
-                                                    family: "JetBrains Mono".to_string().into(),
-                                                    weight: gpui::FontWeight::NORMAL,
-                                                    style: gpui::FontStyle::Normal,
-                                                    features: gpui::FontFeatures::default(),
-                                                    fallbacks: Some(gpui::FontFallbacks::from_fonts(vec!["monospace".to_string()])),
-                                                })
-                                                .text_size(px(14.0))
-                                                .border_0()
-                                        )
-                                )
-                        )
-                        .child(
-                            // Right panel: Debounced markdown preview (only updates every 300ms)
-                            resizable_panel()
-                                .child({
-                                    if !preview_content.is_empty() {
-                                        div()
-                                            .id("markdown-preview-panel")
-                                            .size_full()
-                                            .overflow_y_scroll()
-                                            .p_5()
-                                            .bg(cx.theme().background)
+                            resizable_panel().size(px(400.)).child(
+                                div()
+                                    .size_full()
+                                    .overflow_hidden()
+                                    .border_r_1()
+                                    .border_color(cx.theme().border)
+                                    .child(
+                                        TextInput::new(&open_file.input_state)
+                                            .h_full()
+                                            .w_full()
                                             .font_family("JetBrains Mono")
                                             .font(gpui::Font {
                                                 family: "JetBrains Mono".to_string().into(),
                                                 weight: gpui::FontWeight::NORMAL,
                                                 style: gpui::FontStyle::Normal,
                                                 features: gpui::FontFeatures::default(),
-                                                fallbacks: Some(gpui::FontFallbacks::from_fonts(vec!["monospace".to_string()])),
+                                                fallbacks: Some(gpui::FontFallbacks::from_fonts(
+                                                    vec!["monospace".to_string()],
+                                                )),
                                             })
-                                            .child({
-                                                let preview_content =
-                                                    Self::truncated_markdown_preview(preview_content);
-                                                TextView::markdown(
-                                                    "md-viewer",
-                                                    preview_content,
-                                                    window,
-                                                    cx,
-                                                )
-                                                .selectable()
-                                            })
-                                    } else {
-                                        div()
-                                            .id("markdown-preview-panel")
-                                            .size_full()
-                                            .overflow_y_scroll()
-                                            .p_5()
-                                            .bg(cx.theme().background)
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap_3()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .size_full()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .child(t!("CodeEditor.MarkdownReady").to_string())
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .child(t!("CodeEditor.RefreshHint").to_string())
-                                                    )
+                                            .text_size(px(14.0))
+                                            .border_0(),
+                                    ),
+                            ),
+                        )
+                        .child(
+                            // Right panel: Debounced markdown preview (only updates every 300ms)
+                            resizable_panel().child({
+                                if !preview_content.is_empty() {
+                                    div()
+                                        .id("markdown-preview-panel")
+                                        .size_full()
+                                        .overflow_y_scroll()
+                                        .p_5()
+                                        .bg(cx.theme().background)
+                                        .font_family("JetBrains Mono")
+                                        .font(gpui::Font {
+                                            family: "JetBrains Mono".to_string().into(),
+                                            weight: gpui::FontWeight::NORMAL,
+                                            style: gpui::FontStyle::Normal,
+                                            features: gpui::FontFeatures::default(),
+                                            fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
+                                                "monospace".to_string(),
+                                            ])),
+                                        })
+                                        .child({
+                                            let preview_content =
+                                                Self::truncated_markdown_preview(preview_content);
+                                            TextView::markdown(
+                                                "md-viewer",
+                                                preview_content,
+                                                window,
+                                                cx,
                                             )
-                                    }
-                                })
+                                            .selectable()
+                                        })
+                                } else {
+                                    div()
+                                        .id("markdown-preview-panel")
+                                        .size_full()
+                                        .overflow_y_scroll()
+                                        .p_5()
+                                        .bg(cx.theme().background)
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap_3()
+                                                .items_center()
+                                                .justify_center()
+                                                .size_full()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(div().text_sm().child(
+                                                    t!("CodeEditor.MarkdownReady").to_string(),
+                                                ))
+                                                .child(div().text_xs().child(
+                                                    t!("CodeEditor.RefreshHint").to_string(),
+                                                )),
+                                        )
+                                }
+                            }),
                         )
                         .into_any_element();
                 }
@@ -1526,10 +1526,7 @@ impl TextEditor {
                 } else {
                     format!(
                         "{}{} | {} lines | {} KB",
-                        dirty_marker,
-                        filename,
-                        open_file.lines_count,
-                        file_size_kb
+                        dirty_marker, filename, open_file.lines_count, file_size_kb
                     )
                 };
 
@@ -1546,10 +1543,7 @@ impl TextEditor {
                     format!("Cache: {} lines cached", cache_size)
                 };
 
-                (
-                    (file_info_str, language, cursor_str),
-                    cache_info_str,
-                )
+                ((file_info_str, language, cursor_str), cache_info_str)
             } else {
                 (
                     ("No file".to_string(), "".to_string(), "".to_string()),
@@ -1564,13 +1558,7 @@ impl TextEditor {
         };
 
         let dirty = self.current_file_dirty();
-        let v_sep = || {
-            div()
-                .w_px()
-                .h_3()
-                .bg(cx.theme().border)
-                .rounded_full()
-        };
+        let v_sep = || div().w_px().h_3().bg(cx.theme().border).rounded_full();
 
         h_flex()
             .w_full()
@@ -1611,11 +1599,7 @@ impl TextEditor {
                     .child(v_sep())
                     .child(t!("CodeEditor.Spaces4").to_string())
                     .child(v_sep())
-                    .child(
-                        div()
-                            .text_color(cx.theme().foreground)
-                            .child(file_info.1),
-                    )
+                    .child(div().text_color(cx.theme().foreground).child(file_info.1))
             })
     }
 
@@ -1862,7 +1846,9 @@ impl Render for TextEditor {
                 if let Some(ref workspace) = self.workspace {
                     workspace.clone().into_any_element()
                 } else {
-                    div().child(t!("CodeEditor.Loading").to_string()).into_any_element()
+                    div()
+                        .child(t!("CodeEditor.Loading").to_string())
+                        .into_any_element()
                 },
             ))
             .child(self.render_status_bar(cx));
