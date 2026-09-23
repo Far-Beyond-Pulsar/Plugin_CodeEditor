@@ -36,7 +36,17 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      # This plugin uses path dependencies into the Pulsar workspace.
+      - uses: actions/checkout@v4
+        with:
+          repository: Far-Beyond-Pulsar/Pulsar-Native
+          ref: 4a7e182456a74fc064196d9f36bad6e9b6ca0857
+          submodules: recursive
+          path: pulsar
+
+      - uses: actions/checkout@v4
+        with:
+          path: pulsar/plugins/vendor/code_editor
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -49,12 +59,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
+          sudo apt-get install -y pkg-config libssl-dev libfontconfig1-dev libfreetype6-dev
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
       - name: Run tests
+        working-directory: pulsar/plugins/vendor/code_editor
         run: cargo test --workspace
 
   clippy:
