@@ -1072,8 +1072,8 @@ impl TextEditor {
     pub fn set_scroll_offset(&mut self, offset: Point<Pixels>, cx: &mut Context<Self>) {
         if let Some(index) = self.current_file_index {
             if let Some(file) = self.open_files.get(index) {
-                file.input_state.update(cx, |state, _cx| {
-                    state.set_scroll_offset(offset);
+                file.input_state.update(cx, |state, cx| {
+                    state.set_scroll_offset(offset, cx);
                 });
             }
         }
