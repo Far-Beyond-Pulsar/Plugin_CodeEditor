@@ -1969,6 +1969,7 @@ dependencies = [
  "rapier3d",
  "reqwest",
  "ropey",
+ "rust-embed",
  "scenedb-inspector-agent",
  "serde",
  "serde_json",
@@ -11791,10 +11792,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "pbgc"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "graphy"
 version = "0.1.0"
 
@@ -11804,4 +11801,8 @@ version = "0.1.0"
 
 [[patch.unused]]
 name = "wgsl_std"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "pbgc"
 version = "0.1.0"
