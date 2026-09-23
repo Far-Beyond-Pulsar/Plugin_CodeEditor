@@ -1950,8 +1950,8 @@ dependencies = [
  "helio-pass-decal",
  "helio-pass-forward-lit",
  "helio-pass-gbuffer",
- "helio-pass-voxel-mesh",
  "helio-pass-water-sim",
+ "helio-voxel-data",
  "helio_component",
  "libloading 0.9.0",
  "lsp-types",
@@ -3330,7 +3330,6 @@ dependencies = [
  "helio-pass-tsr",
  "helio-pass-virtual-geometry",
  "helio-pass-volumetric-fog",
- "helio-pass-voxel-mesh",
  "helio-pass-water-sim",
  "image",
  "pulsar_scenedb",
@@ -3766,21 +3765,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "helio-pass-voxel-mesh"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "glam 0.33.8",
- "helio-core",
- "helio-mats",
- "helio-pass-object-batch",
- "log",
- "pulsar_scenedb",
- "pulsar_scenedb_derive",
- "wgpu",
-]
-
-[[package]]
 name = "helio-pass-water-sim"
 version = "0.1.0"
 dependencies = [
@@ -3792,6 +3776,10 @@ dependencies = [
  "pulsar_scenedb_derive",
  "wgpu",
 ]
+
+[[package]]
+name = "helio-voxel-data"
+version = "0.1.0"
 
 [[package]]
 name = "helio-xr"
