@@ -59,7 +59,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev libfontconfig1-dev libfreetype6-dev
+          sudo apt-get install -y pkg-config libssl-dev libfontconfig1-dev libfreetype6-dev \
+            libx11-dev libx11-xcb-dev libwayland-dev libxkbcommon-x11-dev
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
