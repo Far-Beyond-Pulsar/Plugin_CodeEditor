@@ -11792,10 +11792,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "graphy"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "psgc"
 version = "0.1.0"
 
@@ -11805,4 +11801,8 @@ version = "0.1.0"
 
 [[patch.unused]]
 name = "pbgc"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "graphy"
 version = "0.1.0"
