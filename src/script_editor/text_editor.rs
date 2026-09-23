@@ -811,7 +811,7 @@ impl TextEditor {
                 let state = file.input_state.read(cx);
                 tracing::debug!(
                     "📊 Line cache initialized - capacity: {} lines",
-                    state.line_cache().len()
+                    state.line_cache_len()
                 );
 
                 // Log autocomplete configuration
@@ -872,14 +872,14 @@ impl TextEditor {
         let open_file = self.open_files.get(index)?;
 
         let state = open_file.input_state.read(cx);
-        let cache_stats = state.line_cache().stats();
+        let cache_stats = state.line_cache_stats();
 
         Some(format!(
             "📊 Performance: {} lines | Cache: {:.1}% hit rate | {} cached lines | Memory: ~{} MB",
             open_file.lines_count,
             cache_stats.hit_rate() * 100.0,
-            state.line_cache().len(),
-            (state.line_cache().len() * 1024) / (1024 * 1024) // Rough estimate
+            state.line_cache_len(),
+            (state.line_cache_len() * 1024) / (1024 * 1024) // Rough estimate
         ))
     }
 
@@ -1507,8 +1507,8 @@ impl TextEditor {
 
                 // Get cache statistics and live cursor position
                 let state = open_file.input_state.read(cx);
-                let cache_stats = state.line_cache().stats();
-                let cache_size = state.line_cache().len();
+                let cache_stats = state.line_cache_stats();
+                let cache_size = state.line_cache_len();
                 let cursor = state.cursor_position();
                 let cursor_str = format!("Ln {}, Col {}", cursor.line + 1, cursor.character + 1);
 
