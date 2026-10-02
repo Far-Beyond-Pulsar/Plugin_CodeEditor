@@ -80,8 +80,6 @@ profiling         = { path = "../../../crates/profiling" }
 [patch."https://github.com/Far-Beyond-Pulsar/Pulsar-Profiling"]
 profiling = { path = "../../../crates/profiling" }
 
-[patch."https://github.com/Far-Beyond-Pulsar/PBGC"]
-pbgc = { path = "../../../crates/third-party/pbgc" }
 
 [patch."https://github.com/Far-Beyond-Pulsar/Graphy"]
 graphy = { path = "../../../crates/third-party/graphy" }
