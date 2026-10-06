@@ -1,12 +1,13 @@
 use gpui::*;
 use rust_i18n::t;
 use ui::{
+    ActiveTheme as _, ContextModal as _, Icon, IconName, Sizable as _, StyledExt,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{InputEvent, InputState, TabSize, TextInput},
-    resizable::{h_resizable, resizable_panel, ResizableState},
+    resizable::{ResizableState, h_resizable, resizable_panel},
     text::TextView,
-    v_flex, ActiveTheme as _, ContextModal as _, Icon, IconName, Sizable as _, StyledExt,
+    v_flex,
 };
 
 use std::fs;
@@ -61,6 +62,7 @@ pub struct OpenFile {
 }
 
 pub struct TextEditor {
+    settings: plugin_editor_api::EditorSettingsSnapshot,
     focus_handle: FocusHandle,
     /// A list of currently open files in this script editor
     open_files: Vec<OpenFile>,
@@ -85,6 +87,18 @@ pub struct TextEditor {
 
 impl TextEditor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_settings(
+            window,
+            cx,
+            plugin_editor_api::EditorSettingsSnapshot::default(),
+        )
+    }
+
+    pub fn new_with_settings(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        settings: plugin_editor_api::EditorSettingsSnapshot,
+    ) -> Self {
         let markdown_split_state = ResizableState::new(cx);
 
         // Create internal workspace for file tabs
@@ -98,6 +112,7 @@ impl TextEditor {
         });
 
         Self {
+            settings,
             focus_handle: cx.focus_handle(),
             open_files: Vec::new(),
             current_file_index: None,
@@ -353,19 +368,20 @@ impl TextEditor {
 
         // Create an empty file in memory
         let language = languages::PLAINTEXT.id;
+        let settings = self.settings.clone();
         let input_state = cx.new(|cx| {
             let mut state = InputState::new(window, cx)
                 .code_editor(language)
-                .line_number(true)
-                .minimap(true) // Enable VSCode-style minimap
+                .line_number(settings.boolean("line_numbers", true))
+                .minimap(settings.boolean("minimap", true))
                 .tab_size(TabSize {
-                    tab_size: 4,
-                    hard_tabs: false,
+                    tab_size: settings.integer("tab_width", 4).clamp(1, 16) as usize,
+                    hard_tabs: settings.boolean("hard_tabs", false),
                 })
                 // Source editing defaults to fixed-height display rows so
                 // the compositor-backed viewport can shift its retained
                 // surface instead of repainting per wheel tick.
-                .soft_wrap(false);
+                .soft_wrap(settings.boolean("soft_wrap", false));
 
             state.set_value("", window, cx);
             state
@@ -633,6 +649,7 @@ impl TextEditor {
                 languages::HIGHLIGHT_DISABLE_LINES
             );
         }
+        let settings = self.settings.clone();
         let input_state = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             if highlight {
@@ -641,14 +658,17 @@ impl TextEditor {
                 state = state.multi_line();
             }
             let mut state = state
-                .line_number(true)
-                .minimap(highlight) // Enable VSCode-style minimap scrollbar
+                .line_number(settings.boolean("line_numbers", true))
+                .minimap(highlight && settings.boolean("minimap", true))
                 .tab_size(TabSize {
-                    tab_size: 4,
-                    hard_tabs: false,
+                    tab_size: settings.integer("tab_width", 4).clamp(1, 16) as usize,
+                    hard_tabs: settings.boolean("hard_tabs", false),
                 })
                 // Disable soft wrap for large files for better performance
-                .soft_wrap(languages::should_soft_wrap(lines_count, file_size));
+                .soft_wrap(
+                    settings.boolean("soft_wrap", false)
+                        && languages::should_soft_wrap(lines_count, file_size),
+                );
 
             // Set the content after creating the state
             state.set_value(&content, window, cx);
@@ -658,8 +678,10 @@ impl TextEditor {
         // Set up autocomplete for the file with rust-analyzer support
         let workspace_root = self.resolve_workspace_root_for_file(&path);
         if let Some(analyzer) = self.rust_analyzer.clone() {
-            tracing::debug!("[LSP] open_file: rust_analyzer present, calling setup_autocomplete_for_file for {:?}",
-                path.file_name());
+            tracing::debug!(
+                "[LSP] open_file: rust_analyzer present, calling setup_autocomplete_for_file for {:?}",
+                path.file_name()
+            );
             input_state.update(cx, |state, cx| {
                 super::setup_autocomplete_for_file(
                     state,
@@ -1421,7 +1443,7 @@ impl TextEditor {
                                 style: gpui::FontStyle::Normal,
                                 features: gpui::FontFeatures::default(),
                                 fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
-                                    "monospace".to_string()
+                                    "monospace".to_string(),
                                 ])),
                             })
                             .text_size(px(14.0))
@@ -1698,14 +1720,15 @@ impl TextEditor {
             let language = languages::language_for_path(&path).id;
 
             // Create new file entry with provided content
+            let settings = self.settings.clone();
             let input_state = cx.new(|cx| {
                 let mut state = InputState::new(window, cx)
                     .multi_line()
                     .code_editor(language)
-                    .line_number(true)
+                    .line_number(settings.boolean("line_numbers", true))
                     .tab_size(TabSize {
-                        tab_size: 4,
-                        hard_tabs: false,
+                        tab_size: settings.integer("tab_width", 4).clamp(1, 16) as usize,
+                        hard_tabs: settings.boolean("hard_tabs", false),
                     });
                 state.set_value(&content, window, cx);
 

@@ -10,15 +10,16 @@ pub use languages::*;
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use workspace_panels::*;
 
-use rust_i18n::t;
 use gpui::*;
+use rust_i18n::t;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use ui::{
+    ActiveTheme, StyledExt,
     dock::{Panel, PanelEvent},
     h_flex,
-    resizable::{h_resizable, resizable_panel, ResizableState},
-    v_flex, ActiveTheme, StyledExt,
+    resizable::{ResizableState, h_resizable, resizable_panel},
+    v_flex,
 };
 
 use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
@@ -71,6 +72,18 @@ pub struct ScriptEditor {
 
 impl ScriptEditor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_settings(
+            window,
+            cx,
+            plugin_editor_api::EditorSettingsSnapshot::default(),
+        )
+    }
+
+    pub fn new_with_settings(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        settings: plugin_editor_api::EditorSettingsSnapshot,
+    ) -> Self {
         cx.bind_keys([
             KeyBinding::new("ctrl-s", SaveCurrentFile, Some("ScriptEditor")),
             KeyBinding::new("ctrl-w", CloseCurrentFile, Some("ScriptEditor")),
@@ -80,8 +93,8 @@ impl ScriptEditor {
         let diff_resizable_state = ResizableState::new(cx);
 
         let file_explorer = cx.new(|cx| FileExplorer::new(window, cx));
-        let text_editor = cx.new(|cx| TextEditor::new(window, cx));
-        let diff_editor = cx.new(|cx| TextEditor::new(window, cx));
+        let text_editor = cx.new(|cx| TextEditor::new_with_settings(window, cx, settings.clone()));
+        let diff_editor = cx.new(|cx| TextEditor::new_with_settings(window, cx, settings));
 
         // Forward text editor events
         cx.subscribe(
@@ -542,7 +555,9 @@ impl Panel for ScriptEditor {
     }
 
     fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
-        div().child(t!("CodeEditor.ScriptEditor").to_string()).into_any_element()
+        div()
+            .child(t!("CodeEditor.ScriptEditor").to_string())
+            .into_any_element()
     }
 
     fn dump(&self, _cx: &App) -> ui::dock::PanelState {
@@ -551,7 +566,6 @@ impl Panel for ScriptEditor {
             ..Default::default()
         }
     }
-
 }
 
 // Plugin-related methods (called by ScriptEditorWrapper)
@@ -701,18 +715,18 @@ impl Render for ScriptEditor {
                                             ),
                                     ),
                             )
-                            .child(div().flex_1().px_3().py_1p5().child(
-                                div()
-                                    .text_xs()
-                                    .font_medium()
-                                    .tracking_wider()
-                                    .text_color(cx.theme().success)
-                                    .child(
-                                        t!("CodeEditor.AfterRemote")
-                                            .to_string()
-                                            .to_uppercase(),
-                                    ),
-                            )),
+                            .child(
+                                div().flex_1().px_3().py_1p5().child(
+                                    div()
+                                        .text_xs()
+                                        .font_medium()
+                                        .tracking_wider()
+                                        .text_color(cx.theme().success)
+                                        .child(
+                                            t!("CodeEditor.AfterRemote").to_string().to_uppercase(),
+                                        ),
+                                ),
+                            ),
                     )
                     .child(
                         // Side-by-side editors

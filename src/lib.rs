@@ -19,11 +19,11 @@
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+use gpui::*;
 use plugin_editor_api::*;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
-use gpui::*;
 use ui::dock::PanelView;
 
 // Script Editor modules
@@ -31,12 +31,8 @@ mod script_editor;
 
 // Re-export main types
 pub use script_editor::{
-    ScriptEditor as ScriptEditorPanel,
+    DiffFileEntry, FileExplorer, ScriptEditor as ScriptEditorPanel, ScriptEditorMode, TextEditor,
     TextEditorEvent,
-    FileExplorer,
-    TextEditor,
-    ScriptEditorMode,
-    DiffFileEntry,
 };
 
 /// The Script Editor Plugin
@@ -55,7 +51,9 @@ impl EditorPlugin for ScriptEditorPlugin {
             name: "Script Editor".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             author: "Pulsar Team".into(),
-            description: "Professional code editor with LSP support for multiple programming languages".into(),
+            description:
+                "Professional code editor with LSP support for multiple programming languages"
+                    .into(),
         }
     }
 
@@ -157,17 +155,21 @@ impl EditorPlugin for ScriptEditorPlugin {
 
 impl EditorPluginEditor for ScriptEditorPlugin {
     fn register_editors(&'static self, registry: &mut EditorFactoryRegistry) {
-        registry.register_fn(EditorId::new("script-editor"), |file_path, window, cx| {
-            let panel = cx.new(|cx| ScriptEditorPanel::new(window, cx));
+        registry.register_fn_with_settings(
+            EditorId::new("script-editor"),
+            |file_path, settings, window, cx| {
+                let panel =
+                    cx.new(|cx| ScriptEditorPanel::new_with_settings(window, cx, settings.clone()));
 
-            panel.update(cx, |editor, ecx| {
-                editor.open_file(file_path.clone(), window, ecx);
-            });
+                panel.update(cx, |editor, ecx| {
+                    editor.open_file(file_path.clone(), window, ecx);
+                });
 
-            let panel_arc: Arc<dyn ui::dock::PanelView> = Arc::new(panel.clone());
-            log::info!("Created script editor instance for {:?}", file_path);
-            Ok(panel_arc)
-        });
+                let panel_arc: Arc<dyn ui::dock::PanelView> = Arc::new(panel.clone());
+                log::info!("Created script editor instance for {:?}", file_path);
+                Ok(panel_arc)
+            },
+        );
     }
 }
 
