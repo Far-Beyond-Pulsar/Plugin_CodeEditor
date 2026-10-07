@@ -67,6 +67,8 @@ impl EditorPlugin for ScriptEditorPlugin {
                 color: gpui::rgb(0xFF5722).into(),
                 structure: FileStructure::Standalone,
                 default_content: json!("// New Rust script\n"),
+                creation_directory: None,
+
                 categories: vec!["Scripts".to_string()],
             },
             FileTypeDefinition {
@@ -77,6 +79,8 @@ impl EditorPlugin for ScriptEditorPlugin {
                 color: gpui::rgb(0xF7DF1E).into(),
                 structure: FileStructure::Standalone,
                 default_content: json!("// New JavaScript file\n"),
+                creation_directory: None,
+
                 categories: vec!["Scripts".to_string()],
             },
             FileTypeDefinition {
@@ -87,6 +91,8 @@ impl EditorPlugin for ScriptEditorPlugin {
                 color: gpui::rgb(0x3178C6).into(),
                 structure: FileStructure::Standalone,
                 default_content: json!("// New TypeScript file\n"),
+                creation_directory: None,
+
                 categories: vec!["Scripts".to_string()],
             },
             FileTypeDefinition {
@@ -97,6 +103,8 @@ impl EditorPlugin for ScriptEditorPlugin {
                 color: gpui::rgb(0x3776AB).into(),
                 structure: FileStructure::Standalone,
                 default_content: json!("# New Python script\n"),
+                creation_directory: None,
+
                 categories: vec!["Scripts".to_string()],
             },
             FileTypeDefinition {
@@ -107,6 +115,8 @@ impl EditorPlugin for ScriptEditorPlugin {
                 color: gpui::rgb(0x2196F3).into(),
                 structure: FileStructure::Standalone,
                 default_content: json!("-- New Lua script\n"),
+                creation_directory: None,
+
                 categories: vec!["Scripts".to_string()],
             },
             FileTypeDefinition {
@@ -117,6 +127,8 @@ impl EditorPlugin for ScriptEditorPlugin {
                 color: gpui::rgb(0x9E9E9E).into(),
                 structure: FileStructure::Standalone,
                 default_content: json!("# TOML configuration file\n"),
+                creation_directory: None,
+
                 categories: vec!["Data".to_string()],
             },
             FileTypeDefinition {
@@ -127,6 +139,8 @@ impl EditorPlugin for ScriptEditorPlugin {
                 color: gpui::rgb(0xFF5722).into(),
                 structure: FileStructure::Standalone,
                 default_content: json!("# New Document\n"),
+                creation_directory: None,
+
                 categories: vec!["Documents".to_string()],
             },
         ]
