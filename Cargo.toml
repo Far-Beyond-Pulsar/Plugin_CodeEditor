@@ -22,6 +22,7 @@ plugin_editor_api = { path = "../../../crates/core/plugin_editor_api" }
 # incompatible `Window`/`Panel` types: `gpui::Window` vs `gpui::window::Window`).
 gpui-ce = { path = "../../../crates/ui/wgpui" }
 ui      = { path = "../../../crates/ui/wgpui-component/crates/ui", features = ["tree-sitter-languages"] }
+wgpui-base = { path = "../../../crates/ui/wgpui-base" }
 ui_common       = { path = "../../../crates/editor/ui_common" }
 ui_types_common = { path = "../../../crates/editor/ui_types_common" }
 

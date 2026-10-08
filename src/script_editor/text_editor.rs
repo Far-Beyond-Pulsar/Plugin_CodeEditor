@@ -14,6 +14,7 @@ use ui::{
     button::{Button, ButtonVariants as _},
     h_flex, v_flex, ActiveTheme as _, PixelsExt as _, Sizable as _, StyledExt,
 };
+use wgpui_base::ElementExt as _;
 
 #[derive(Clone)]
 pub enum TextEditorEvent {
