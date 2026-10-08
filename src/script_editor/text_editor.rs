@@ -546,14 +546,14 @@ impl TextEditor {
                 surface_theme.background
             };
             let mut code = div()
+                .relative()
                 .flex_1()
                 .h(px(row.height))
                 .pl(px(12.0))
                 .font_family("JetBrains Mono")
                 .text_color(surface_color(surface_theme.foreground))
                 .bg(surface_color(row_background))
-                .whitespace_nowrap()
-                .child(row.text.clone());
+                .whitespace_nowrap();
             for selection in frame
                 .selections
                 .iter()
@@ -573,6 +573,7 @@ impl TextEditor {
                         })),
                 );
             }
+            code = code.child(row.text.clone());
             for caret in frame
                 .carets
                 .iter()
