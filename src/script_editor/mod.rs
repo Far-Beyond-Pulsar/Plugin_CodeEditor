@@ -237,6 +237,22 @@ impl ScriptEditor {
                                 }
                             });
                         }
+                        TextEditorEvent::FileChanged {
+                            path,
+                            content,
+                            version,
+                        } => {
+                            analyzer.update(cx, |analyzer, _cx| {
+                                if let Err(error) =
+                                    analyzer.did_change_file(path, content, *version)
+                                {
+                                    tracing::error!(
+                                        "Failed to notify rust-analyzer of change: {}",
+                                        error
+                                    );
+                                }
+                            });
+                        }
                         TextEditorEvent::FileClosed { path } => {
                             tracing::debug!("❌ ScriptEditor handling FileClosed: {:?}", path);
                             // Notify rust-analyzer that a file was closed

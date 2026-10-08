@@ -25,6 +25,12 @@ ui      = { path = "../../../crates/ui/wgpui-component/crates/ui", features = ["
 ui_common       = { path = "../../../crates/editor/ui_common" }
 ui_types_common = { path = "../../../crates/editor/ui_types_common" }
 
+# Keep Mockaco on the tree-sitter 0.24-compatible surface revision used by
+# WGPUI. The host adapter bridges clipboard/history/navigation on this API.
+mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "46a5807da4d5d86b7334ccf7cc2577f022b7bc12" }
+mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "46a5807da4d5d86b7334ccf7cc2577f022b7bc12" }
+mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "46a5807da4d5d86b7334ccf7cc2577f022b7bc12" }
+
 # Engine dependencies
 engine_state  = { path = "../../../crates/core/engine_state" }
 engine_backend     = { path = "../../../crates/core/engine_backend" }
