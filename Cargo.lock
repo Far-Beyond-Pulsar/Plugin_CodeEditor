@@ -8038,6 +8038,7 @@ dependencies = [
  "ui_common",
  "ui_types_common",
  "uuid",
+ "wgpui-base",
 ]
 
 [[package]]

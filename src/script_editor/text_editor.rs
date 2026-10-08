@@ -663,7 +663,7 @@ fn surface_theme(theme: &ui::Theme) -> mockaco_gpui::SurfaceTheme {
         foreground: surface_color_from_hsla(theme.foreground),
         gutter_foreground: surface_color_from_hsla(theme.muted_foreground),
         selection: surface_color_from_hsla(theme.selection),
-        primary_selection: surface_color_from_hsla(theme.accent),
+        primary_selection: surface_color_from_hsla(theme.selection),
         caret: surface_color_from_hsla(theme.caret),
         decoration: surface_color_from_hsla(theme.warning),
     }
