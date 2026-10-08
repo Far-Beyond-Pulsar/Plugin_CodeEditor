@@ -58,7 +58,6 @@ impl OpenFile {
     fn new(path: PathBuf, content: String) -> Self {
         let mut surface =
             EditorSurface::new(content, Default::default(), SurfaceGeometry::default());
-        surface.set_viewport(32, 100);
         Self {
             path,
             surface,
@@ -505,8 +504,8 @@ impl TextEditor {
         );
     }
 
-    fn render_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(file) = self.current_file() else {
+    fn render_editor(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(file) = self.current_file_mut() else {
             return v_flex()
                 .size_full()
                 .items_center()
@@ -516,8 +515,12 @@ impl TextEditor {
                 .into_any_element();
         };
 
+        let theme = surface_theme(cx.theme());
+        if file.surface.theme() != theme {
+            file.surface.set_theme(theme);
+        }
         let frame = file.surface.render_frame();
-        let theme = frame.theme;
+        let surface_theme = frame.theme;
         let mut rows = v_flex().size_full().overflow_hidden();
         for row in frame.rows {
             let gutter = frame
@@ -532,21 +535,21 @@ impl TextEditor {
                 .any(|caret| caret.display_row == row.display_row && caret.primary);
             let row_background = if file.diff_lines.contains(&row.buffer_line) {
                 if file.diff_removed {
-                    SurfaceColor::rgba(105, 42, 46, 115)
+                    with_alpha(surface_color_from_hsla(cx.theme().danger), 115)
                 } else {
-                    SurfaceColor::rgba(40, 98, 63, 115)
+                    with_alpha(surface_color_from_hsla(cx.theme().success), 115)
                 }
             } else if is_active {
-                SurfaceColor::rgba(36, 44, 58, 150)
+                with_alpha(surface_color_from_hsla(cx.theme().list_active), 150)
             } else {
-                theme.background
+                surface_theme.background
             };
             let mut code = div()
                 .flex_1()
                 .h(px(row.height))
                 .pl(px(12.0))
                 .font_family("JetBrains Mono")
-                .text_color(surface_color(theme.foreground))
+                .text_color(surface_color(surface_theme.foreground))
                 .bg(surface_color(row_background))
                 .whitespace_nowrap()
                 .child(row.text.clone());
@@ -563,9 +566,9 @@ impl TextEditor {
                         .w(px(selection.width.max(1.0)))
                         .h(px(selection.height))
                         .bg(surface_color(if selection.primary {
-                            theme.primary_selection
+                            surface_theme.primary_selection
                         } else {
-                            theme.selection
+                            surface_theme.selection
                         })),
                 );
             }
@@ -581,7 +584,7 @@ impl TextEditor {
                         .top(px(caret.y - row.y))
                         .w(px(if caret.primary { 2.0 } else { 1.0 }))
                         .h(px(caret.height))
-                        .bg(surface_color(theme.caret)),
+                        .bg(surface_color(surface_theme.caret)),
                 );
             }
             rows = rows.child(
@@ -594,14 +597,15 @@ impl TextEditor {
                             .pr_2()
                             .text_right()
                             .font_family("JetBrains Mono")
-                            .text_color(surface_color(theme.gutter_foreground))
-                            .bg(surface_color(theme.gutter_background))
+                            .text_color(surface_color(surface_theme.gutter_foreground))
+                            .bg(surface_color(surface_theme.gutter_background))
                             .child(line_number.to_string()),
                     )
                     .child(code),
             );
         }
 
+        let editor_entity = cx.entity();
         div()
             .size_full()
             .overflow_hidden()
@@ -619,6 +623,23 @@ impl TextEditor {
             .on_key_down(cx.listener(Self::on_key_down))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .child(rows)
+            .on_prepaint(move |bounds, _, cx| {
+                let width = bounds.size.width.as_f32().max(1.0);
+                let height = bounds.size.height.as_f32().max(1.0);
+                editor_entity.update(cx, |editor, cx| {
+                    let Some(file) = editor.current_file_mut() else {
+                        return;
+                    };
+
+                    let mut geometry = file.surface.geometry();
+                    geometry.width = width;
+                    geometry.height = height;
+                    if file.surface.geometry() != geometry {
+                        file.surface.set_geometry(geometry);
+                        cx.notify();
+                    }
+                });
+            })
             .into_any_element()
     }
 }
@@ -631,6 +652,33 @@ fn surface_color(color: SurfaceColor) -> Hsla {
         a: f32::from(color.alpha) / 255.0,
     }
     .into()
+}
+
+fn surface_theme(theme: &ui::Theme) -> mockaco_gpui::SurfaceTheme {
+    mockaco_gpui::SurfaceTheme {
+        background: surface_color_from_hsla(theme.background),
+        gutter_background: surface_color_from_hsla(theme.muted),
+        foreground: surface_color_from_hsla(theme.foreground),
+        gutter_foreground: surface_color_from_hsla(theme.muted_foreground),
+        selection: surface_color_from_hsla(theme.selection),
+        primary_selection: surface_color_from_hsla(theme.accent),
+        caret: surface_color_from_hsla(theme.caret),
+        decoration: surface_color_from_hsla(theme.warning),
+    }
+}
+
+fn surface_color_from_hsla(color: Hsla) -> SurfaceColor {
+    let rgba: Rgba = color.into();
+    SurfaceColor::rgba(
+        (rgba.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
+fn with_alpha(color: SurfaceColor, alpha: u8) -> SurfaceColor {
+    SurfaceColor { alpha, ..color }
 }
 
 impl EventEmitter<TextEditorEvent> for TextEditor {}
