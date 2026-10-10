@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use ui::{
     button::{Button, ButtonVariants as _},
     context_menu::ContextMenuExt as _,
-    h_flex, v_flex, ActiveTheme as _, Sizable as _,
+    h_flex, v_flex, ActiveTheme as _, Disableable as _, Sizable as _,
 };
 
 actions!(
