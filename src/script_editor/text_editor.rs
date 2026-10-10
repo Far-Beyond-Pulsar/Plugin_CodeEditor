@@ -1,21 +1,42 @@
-use gpui::*;
-use rust_i18n::t;
-use ui::{
-    button::{Button, ButtonVariants as _},
-    h_flex,
-    input::{InputEvent, InputState, TabSize, TextInput},
-    resizable::{h_resizable, resizable_panel, ResizableState},
-    text::TextView,
-    v_flex, ActiveTheme as _, ContextModal as _, Icon, IconName, Sizable as _, StyledExt,
-};
+//! Pulsar host for Mockaco.
+//!
+//! Mockaco owns everything about the editing surface: text layout, syntax
+//! highlighting, folding, caret/selection, scrolling, scrollbars, minimap and
+//! input. This module only does what is specific to Pulsar: file tabs, file
+//! I/O, bridging the UI theme into Mockaco's theme, and forwarding document
+//! events to the rest of the plugin.
 
+use gpui::*;
+use mockaco_diff::DiffRowKind;
+use mockaco_gpui::native::{EditorEvent, WgpuiEditorView};
+use mockaco_gpui::{DiffSplitSurface, EditorSurface, Language, SurfaceColor, SurfaceGeometry, SurfaceTheme};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
-use std::time::Instant;
+use ui::{
+    button::{Button, ButtonVariants as _},
+    context_menu::ContextMenuExt as _,
+    h_flex, v_flex, ActiveTheme as _, Sizable as _,
+};
 
-use super::languages;
+actions!(
+    mockaco_editor,
+    [
+        EditorUndo,
+        EditorRedo,
+        EditorCut,
+        EditorCopy,
+        EditorPaste,
+        EditorSelectAll,
+        EditorUnfoldAll,
+        EditorSave,
+        EditorCopyPath,
+    ]
+);
 
-use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
+const FONT_FAMILY: &str = "JetBrains Mono";
+const FONT_SIZE: f32 = 14.0;
+const LINE_HEIGHT: f32 = 20.0;
 
 #[derive(Clone)]
 pub enum TextEditorEvent {
@@ -26,6 +47,11 @@ pub enum TextEditorEvent {
         path: PathBuf,
         content: String,
     },
+    FileChanged {
+        path: PathBuf,
+        content: String,
+        version: i32,
+    },
     FileSaved {
         path: PathBuf,
         content: String,
@@ -33,7 +59,6 @@ pub enum TextEditorEvent {
     FileClosed {
         path: PathBuf,
     },
-    /// Request to navigate to a specific location (for go-to-definition)
     NavigateToLocation {
         path: PathBuf,
         line: u32,
@@ -41,1831 +66,701 @@ pub enum TextEditorEvent {
     },
 }
 
-#[derive(Clone)]
 pub struct OpenFile {
     pub path: PathBuf,
-    pub input_state: Entity<InputState>,
+    pub view: Entity<WgpuiEditorView>,
     pub is_modified: bool,
-    pub lines_count: usize,
-    pub file_size: usize,
-    /// Document version for LSP synchronization
     pub version: i32,
-    /// Whether to render this file as markdown
-    pub render_as_markdown: bool,
-    /// Cached markdown preview content (to avoid re-rendering on every frame)
-    pub markdown_preview_cache: String,
-    /// Last time markdown was rendered
-    pub last_markdown_render: Option<Instant>,
-    /// Pending scroll target (line, column) - will be applied after layout is ready
-    pub pending_scroll_target: Option<(usize, usize)>,
+    _subscription: Subscription,
 }
 
 pub struct TextEditor {
     focus_handle: FocusHandle,
-    /// A list of currently open files in this script editor
     open_files: Vec<OpenFile>,
     current_file_index: Option<usize>,
-    /// Performance monitoring
-    last_render_time: Option<Instant>,
-    show_performance_stats: bool,
-    subscriptions: Vec<Subscription>,
-    /// Global rust analyzer for LSP support
-    rust_analyzer: Option<Entity<RustAnalyzerManager>>,
-    /// Resizable state for markdown split view
-    markdown_split_state: Entity<ResizableState>,
-    /// Pending navigation (path, line, character) to be handled when we have window access
-    pending_navigation: Option<(PathBuf, u32, u32)>,
-    /// Internal workspace for draggable file tabs
-    workspace: Option<Entity<ui::workspace::Workspace>>,
-    /// Track if workspace has been initialized
-    workspace_initialized: bool,
-    /// Pending panels to add (file index, path, input_state)
-    pending_panels_to_add: Vec<(usize, PathBuf, Entity<InputState>)>,
+    applied_theme: Option<SurfaceTheme>,
+    generating: bool,
 }
 
 impl TextEditor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let markdown_split_state = ResizableState::new(cx);
+        Self::new_with_settings(
+            window,
+            cx,
+            plugin_editor_api::EditorSettingsSnapshot::default(),
+        )
+    }
 
-        // Create internal workspace for file tabs
-        let workspace = cx.new(|cx| {
-            ui::workspace::Workspace::new_with_channel(
-                "text-editor-workspace",
-                ui::dock::DockChannel(4), // Unique channel for text editor internal workspace
-                window,
-                cx,
-            )
-        });
-
+    pub fn new_with_settings(
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+        _settings: plugin_editor_api::EditorSettingsSnapshot,
+    ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             open_files: Vec::new(),
             current_file_index: None,
-            last_render_time: None,
-            show_performance_stats: false,
-            subscriptions: Vec::new(),
-            rust_analyzer: None,
-            markdown_split_state,
-            pending_navigation: None,
-            workspace: Some(workspace),
-            workspace_initialized: false,
-            pending_panels_to_add: Vec::new(),
+            applied_theme: None,
+            generating: false,
         }
     }
 
-    /// Manually refresh the markdown preview for the current file
-    pub fn refresh_markdown_preview(&mut self, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            if let Some(file) = self.open_files.get_mut(index) {
-                if file.render_as_markdown {
-                    let content = file.input_state.read(cx).value().to_string();
-                    file.markdown_preview_cache = content;
-                    file.last_markdown_render = Some(Instant::now());
-                    cx.notify();
-                }
-            }
-        }
-    }
-
-    const MARKDOWN_PREVIEW_MAX_LINES: usize = 2000;
-
-    fn truncated_markdown_preview(content: &str) -> String {
-        let total_lines = content.lines().count();
-        if total_lines <= Self::MARKDOWN_PREVIEW_MAX_LINES {
-            return content.to_string();
-        }
-
-        let mut truncated = content
-            .lines()
-            .take(Self::MARKDOWN_PREVIEW_MAX_LINES)
-            .collect::<Vec<_>>()
-            .join("\n");
-        truncated.push_str(&format!(
-            "\n\n---\n\n*Preview truncated: showing the first {} of {total_lines} lines.*",
-            Self::MARKDOWN_PREVIEW_MAX_LINES
-        ));
-        truncated
-    }
-
-    /// Set the global rust analyzer manager.
-    ///
-    /// Also retroactively wires LSP providers for files already open so that
-    /// files opened before the host analyzer was injected still get full
-    /// completion / hover / go-to-definition support.
     pub fn set_rust_analyzer(
         &mut self,
-        analyzer: Entity<RustAnalyzerManager>,
-        cx: &mut Context<Self>,
+        _analyzer: Entity<engine_backend::services::rust_analyzer_manager::RustAnalyzerManager>,
+        _cx: &mut Context<Self>,
     ) {
-        tracing::debug!(
-            "[LSP] TextEditor::set_rust_analyzer called, open_files={}",
-            self.open_files.len()
+        // The ScriptEditor event bridge forwards Mockaco document changes.
+    }
+
+    fn create_view(
+        &mut self,
+        path: &PathBuf,
+        content: String,
+        cx: &mut Context<Self>,
+    ) -> Entity<WgpuiEditorView> {
+        let theme = surface_theme(cx.theme());
+        let surface = EditorSurface::with_language(
+            content,
+            Default::default(),
+            SurfaceGeometry::default(),
+            Language::from_path(path),
         );
-        self.rust_analyzer = Some(analyzer.clone());
-
-        if self.open_files.is_empty() {
-            tracing::debug!("[LSP] No open files to back-fill LSP providers for.");
-            return;
-        }
-
-        // Back-fill LSP providers for files that were already open before the
-        // analyzer arrived (e.g., files opened in ScriptEditor::new before the
-        // host calls set_rust_analyzer).
-        let files: Vec<(PathBuf, Entity<InputState>)> = self
-            .open_files
-            .iter()
-            .map(|f| (f.path.clone(), f.input_state.clone()))
-            .collect();
-
-        for (path, input_state) in files {
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_owned();
-            if ext != "rs" {
-                continue; // Only Rust files use rust-analyzer
-            }
-            tracing::debug!(
-                "[LSP] Back-filling providers for already-open file {:?}",
-                path.file_name()
-            );
-            let a2 = analyzer.clone();
-            let ws = self
-                .resolve_workspace_root_for_file(&path)
-                .unwrap_or_else(|| path.parent().map(|p| p.to_path_buf()).unwrap_or_default());
-            let p2 = path.clone();
-            input_state.update(cx, |state, _cx| {
-                let provider = std::rc::Rc::new(
-                    engine_backend::services::lsp_completion_provider::GlobalRustAnalyzerCompletionProvider::new(
-                        a2, p2, ws,
-                    ),
-                );
-                state.lsp.completion_provider = Some(provider.clone());
-                state.lsp.definition_provider = Some(provider.clone());
-                state.lsp.hover_provider = Some(provider);
-                tracing::debug!("[LSP] Back-fill done for {:?}", path.file_name());
-            });
-        }
-    }
-
-    /// Add pending file panels to the first available TabPanel
-    fn add_pending_panels_to_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending_panels_to_add.is_empty() || !self.workspace_initialized {
-            return;
-        }
-
-        if let Some(workspace) = self.workspace.clone() {
-            let text_editor_weak = cx.entity().downgrade();
-            let panels_to_add = std::mem::take(&mut self.pending_panels_to_add);
-
-            // Defer adding panels to avoid reentrant updates
-            window.defer(cx, move |window, cx| {
-                _ = workspace.update(cx, |workspace, cx| {
-                    let dock_area = workspace.dock_area();
-
-                    // Get the first TabPanel from the center items
-                    if let Some(tab_panel) = dock_area.read(cx).items().left_top_tab_panel(cx) {
-                        for (index, path, input_state) in panels_to_add {
-                            let panel = cx.new(|cx| {
-                                use crate::script_editor::FilePanelWrapper;
-                                FilePanelWrapper::new(
-                                    text_editor_weak.clone(),
-                                    index,
-                                    path,
-                                    input_state,
-                                    cx,
-                                )
-                            });
-
-                            _ = tab_panel.update(cx, |tab_panel, cx| {
-                                tab_panel.add_panel(
-                                    std::sync::Arc::new(panel)
-                                        as std::sync::Arc<dyn ui::dock::PanelView>,
-                                    window,
-                                    cx,
-                                );
-                            });
-                        }
-                    }
-                });
-            });
-        }
-    }
-
-    /// Initialize/reinitialize workspace with current files
-    fn initialize_workspace_once(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Process pending panels by adding them efficiently
-        if !self.pending_panels_to_add.is_empty() && self.workspace_initialized {
-            self.add_pending_panels_to_workspace(window, cx);
-            return;
-        }
-
-        if self.workspace_initialized {
-            return;
-        }
-
-        if let Some(ref workspace) = self.workspace {
-            let text_editor_weak = cx.entity().downgrade();
-
-            workspace.update(cx, |workspace, cx| {
-                let dock_area = workspace.dock_area().downgrade();
-
-                if self.open_files.is_empty() {
-                    // Show welcome panel when no files
-                    let welcome_panel = cx.new(|cx| {
-                        use crate::script_editor::WelcomePanelWrapper;
-                        WelcomePanelWrapper::new(cx)
-                    });
-
-                    workspace.initialize(
-                        ui::dock::DockItem::tabs(
-                            vec![std::sync::Arc::new(welcome_panel)
-                                as std::sync::Arc<dyn ui::dock::PanelView>],
-                            Some(0),
-                            &dock_area,
-                            window,
-                            cx,
-                        ),
-                        None,
-                        None,
-                        None,
-                        window,
-                        cx,
-                    );
-                } else {
-                    // Create panels for all open files
-                    let file_panels: Vec<std::sync::Arc<dyn ui::dock::PanelView>> = self
-                        .open_files
-                        .iter()
-                        .enumerate()
-                        .map(|(index, open_file)| {
-                            let panel = cx.new(|cx| {
-                                use crate::script_editor::FilePanelWrapper;
-                                FilePanelWrapper::new(
-                                    text_editor_weak.clone(),
-                                    index,
-                                    open_file.path.clone(),
-                                    open_file.input_state.clone(),
-                                    cx,
-                                )
-                            });
-                            std::sync::Arc::new(panel) as std::sync::Arc<dyn ui::dock::PanelView>
-                        })
-                        .collect();
-
-                    workspace.initialize(
-                        ui::dock::DockItem::tabs(
-                            file_panels,
-                            self.current_file_index,
-                            &dock_area,
-                            window,
-                            cx,
-                        ),
-                        None,
-                        None,
-                        None,
-                        window,
-                        cx,
-                    );
-                }
-            });
-
-            self.workspace_initialized = true;
-        }
-    }
-
-    /// Mark that files have changed (workspace will re-render)
-    fn mark_files_changed(&mut self, cx: &mut Context<Self>) {
-        // Just notify - the workspace will pick up changes on next render
-        cx.notify();
-    }
-
-    /// Create a new empty file
-    pub fn create_new_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Generate a unique untitled file name
-        let mut counter = 1;
-        let mut new_path = PathBuf::from(format!("untitled-{}.txt", counter));
-        while self.open_files.iter().any(|f| f.path == new_path) {
-            counter += 1;
-            new_path = PathBuf::from(format!("untitled-{}.txt", counter));
-        }
-
-        // Create an empty file in memory
-        let language = languages::PLAINTEXT.id;
-        let input_state = cx.new(|cx| {
-            let mut state = InputState::new(window, cx)
-                .code_editor(language)
-                .line_number(true)
-                .minimap(true) // Enable VSCode-style minimap
-                .tab_size(TabSize {
-                    tab_size: 4,
-                    hard_tabs: false,
-                })
-                // Source editing defaults to fixed-height display rows so
-                // the compositor-backed viewport can shift its retained
-                // surface instead of repainting per wheel tick.
-                .soft_wrap(false);
-
-            state.set_value("", window, cx);
-            state
+        let view = cx.new(|cx| {
+            let mut view = WgpuiEditorView::new(surface, cx);
+            view.set_font(FONT_FAMILY, FONT_SIZE, LINE_HEIGHT);
+            view
         });
+        view.update(cx, |view, cx| view.set_theme(theme, cx));
+        view
+    }
 
-        let open_file = OpenFile {
-            path: new_path.clone(),
-            input_state: input_state.clone(),
-            is_modified: false,
-            lines_count: 1,
-            file_size: 0,
-            version: 1,
-            render_as_markdown: false,
-            markdown_preview_cache: String::new(),
-            last_markdown_render: None,
-            pending_scroll_target: None,
-        };
-
-        self.open_files.push(open_file);
-        let new_index = self.open_files.len() - 1;
-        self.current_file_index = Some(new_index);
-
-        // Queue panel to be added on next render
-        self.pending_panels_to_add
-            .push((new_index, new_path.clone(), input_state.clone()));
-
-        // Create subscription for this file
-        let analyzer = self.rust_analyzer.clone();
-        tracing::debug!(
-            "📝 Creating change subscription for new file, rust_analyzer present: {}",
-            analyzer.is_some()
-        );
+    fn push_file(&mut self, path: PathBuf, view: Entity<WgpuiEditorView>, cx: &mut Context<Self>) {
+        let event_path = path.clone();
         let subscription = cx.subscribe(
-            &input_state,
-            move |this: &mut TextEditor,
-                  input_state_entity: Entity<InputState>,
-                  event: &InputEvent,
-                  cx: &mut Context<TextEditor>| {
-                if let InputEvent::Change = event {
-                    if let Some(index) = this
-                        .open_files
-                        .iter()
-                        .position(|f| f.input_state == input_state_entity)
-                    {
-                        if let Some(file) = this.open_files.get_mut(index) {
-                            file.is_modified = true;
-                            file.version += 1;
-
-                            // Notify rust-analyzer of the change
-                            if let Some(ref analyzer) = analyzer {
-                                let path = file.path.clone();
-                                let version = file.version;
-                                let content = file.input_state.read(cx).value().to_string();
-
-                                tracing::debug!(
-                                    "📝 File changed: {:?} (version {}), notifying rust-analyzer",
-                                    path.file_name(),
-                                    version
-                                );
-                                analyzer.update(cx, |analyzer, _cx| {
-                                    if let Err(e) =
-                                        analyzer.did_change_file(&path, &content, version)
-                                    {
-                                        tracing::error!(
-                                            "⚠️  Failed to notify rust-analyzer of file change: {}",
-                                            e
-                                        );
-                                    } else {
-                                        if version % 10 == 0 {
-                                            // Log every 10th change to avoid spam
-                                            tracing::debug!(
-                                                "✓ Notified rust-analyzer of change (version {})",
-                                                version
-                                            );
-                                        }
-                                    }
-                                });
-                            } else {
-                                if file.version == 2 {
-                                    // Only log once to avoid spam
-                                    tracing::debug!("⚠️  No rust-analyzer available for didChange");
-                                }
-                            }
-
-                            cx.notify();
-                        }
-                    }
-                }
+            &view,
+            move |this: &mut Self, view: Entity<WgpuiEditorView>, event: &EditorEvent, cx| {
+                this.on_editor_event(&event_path, &view, event, cx);
             },
         );
-
-        self.subscriptions.push(subscription);
-
-        tracing::debug!("✓ Created new file: {:?}", new_path);
-        cx.notify();
+        self.open_files.push(OpenFile {
+            path,
+            view,
+            is_modified: false,
+            version: 1,
+            _subscription: subscription,
+        });
+        self.current_file_index = Some(self.open_files.len() - 1);
     }
 
-    /// Open a file picker dialog (platform-specific)
-    pub fn open_folder_dialog(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        // For now, open the current working directory
-        // In a real implementation, this would show a platform file picker
-        if let Ok(cwd) = std::env::current_dir() {
-            tracing::debug!("✓ Opening folder: {:?}", cwd);
-            // Emit an event or call a method to open this folder in the file explorer
-            cx.emit(TextEditorEvent::OpenFolderRequested(cwd));
-        }
-        cx.notify();
-    }
-
-    /// Show search/find dialog
-    pub fn show_find_dialog(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            if let Some(file) = self.open_files.get(index) {
-                // Trigger search on the input state
-                file.input_state.update(cx, |state, cx| {
-                    // The InputState has a search panel that can be shown
-                    // Emit focus event to potentially show search
-                    tracing::debug!("✓ Opening search panel for current file");
-                    cx.emit(ui::input::InputEvent::Focus);
+    fn on_editor_event(
+        &mut self,
+        path: &PathBuf,
+        view: &Entity<WgpuiEditorView>,
+        event: &EditorEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.open_files.iter().position(|file| &file.path == path) else {
+            return;
+        };
+        match event {
+            EditorEvent::Changed => {
+                let content = view.read(cx).text();
+                let file = &mut self.open_files[index];
+                file.is_modified = true;
+                file.version = file.version.saturating_add(1);
+                cx.emit(TextEditorEvent::FileChanged {
+                    path: path.clone(),
+                    content,
+                    version: self.open_files[index].version,
                 });
+                cx.notify();
+            }
+            EditorEvent::SaveRequested => {
+                self.save_file_at(index, cx);
             }
         }
-        cx.notify();
-    }
-
-    /// Show find and replace dialog
-    pub fn show_replace_dialog(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            if let Some(file) = self.open_files.get(index) {
-                // Trigger search/replace on the input state
-                file.input_state.update(cx, |state, cx| {
-                    tracing::debug!("✓ Opening find/replace panel for current file");
-                    // The search panel supports replace functionality
-                    cx.emit(ui::input::InputEvent::Focus);
-                });
-            }
-        }
-        cx.notify();
-    }
-
-    /// Run the current script file
-    pub fn run_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            if let Some(file) = self.open_files.get(index) {
-                let path = file.path.clone();
-                let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
-                tracing::debug!("🚀 Running file: {:?}", path);
-
-                // Determine how to run based on file extension
-                let command = match extension {
-                    "rs" => format!(
-                        "rustc {} && ./{}",
-                        path.display(),
-                        path.with_extension("").display()
-                    ),
-                    "py" => format!("python {}", path.display()),
-                    "js" | "ts" => format!("node {}", path.display()),
-                    "sh" => format!("bash {}", path.display()),
-                    _ => {
-                        tracing::debug!("⚠️  Don't know how to run .{} files", extension);
-                        cx.emit(TextEditorEvent::RunScriptRequested(
-                            path,
-                            "unknown".to_string(),
-                        ));
-                        return;
-                    }
-                };
-
-                cx.emit(TextEditorEvent::RunScriptRequested(path, command));
-            }
-        }
-        cx.notify();
-    }
-
-    /// Debug the current script file
-    pub fn debug_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            if let Some(file) = self.open_files.get(index) {
-                let path = file.path.clone();
-                tracing::debug!("🐛 Debugging file: {:?}", path);
-                cx.emit(TextEditorEvent::DebugScriptRequested(path));
-            }
-        }
-        cx.notify();
     }
 
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        // Check if file is already open
-        if let Some(index) = self.open_files.iter().position(|f| f.path == path) {
+        if let Some(index) = self.open_files.iter().position(|file| file.path == path) {
             self.current_file_index = Some(index);
+            self.focus_current(window, cx);
             cx.notify();
             return;
         }
 
-        // Read file content with timing
-        let read_start = Instant::now();
         let content = match fs::read_to_string(&path) {
-            Ok(content) => {
-                let read_time = read_start.elapsed();
-                tracing::debug!(
-                    "✓ Read file {:?} - {} bytes in {:.2}ms",
-                    path.file_name().unwrap_or_default(),
-                    content.len(),
-                    read_time.as_secs_f64() * 1000.0
-                );
-                content
-            }
-            Err(err) => {
-                tracing::error!("✗ Failed to read file: {:?}, error: {}", path, err);
-                return;
-            }
-        };
-
-        let file_size = content.len();
-        let lines_count = content.lines().count();
-
-        // Determine syntax highlighting based on file extension
-        let language = self.get_language_from_extension(&path);
-
-        // Check if this is a markdown file
-        let is_markdown = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext == "md")
-            .unwrap_or(false);
-
-        tracing::debug!(
-            "📄 Opening file: {} lines, {} KB, language: {}{}",
-            lines_count,
-            file_size / 1024,
-            language,
-            if is_markdown {
-                " (markdown preview mode)"
-            } else {
-                ""
-            }
-        );
-
-        // Warn user about very large files
-        if lines_count > 50_000 {
-            tracing::debug!(
-                "⚠️  Large file detected ({} lines). Some features may be disabled for performance:",
-                lines_count
-            );
-            tracing::debug!("   - Syntax highlighting disabled");
-            tracing::debug!("   - Soft wrap disabled");
-        } else if lines_count > 10_000 {
-            tracing::debug!(
-                "ℹ️  Large file ({} lines). Performance optimizations enabled:",
-                lines_count
-            );
-            tracing::debug!("   - Soft wrap disabled");
-            tracing::debug!("   - Virtual scrolling enabled");
-        }
-
-        // Create editor state with optimal settings for large files
-        let setup_start = Instant::now();
-        let language = languages::language_for_path(&path);
-        let highlight = languages::highlighting_enabled(lines_count);
-        if !highlight {
-            tracing::debug!(
-                "⚠️  Syntax highlighting disabled for large file ({} lines > {})",
-                lines_count,
-                languages::HIGHLIGHT_DISABLE_LINES
-            );
-        }
-        let input_state = cx.new(|cx| {
-            let mut state = InputState::new(window, cx);
-            if highlight {
-                state = state.code_editor(language.id);
-            } else {
-                state = state.multi_line();
-            }
-            let mut state = state
-                .line_number(true)
-                .minimap(highlight) // Enable VSCode-style minimap scrollbar
-                .tab_size(TabSize {
-                    tab_size: 4,
-                    hard_tabs: false,
-                })
-                // Disable soft wrap for large files for better performance
-                .soft_wrap(languages::should_soft_wrap(lines_count, file_size));
-
-            // Set the content after creating the state
-            state.set_value(&content, window, cx);
-            state
-        });
-
-        // Set up autocomplete for the file with rust-analyzer support
-        let workspace_root = self.resolve_workspace_root_for_file(&path);
-        if let Some(analyzer) = self.rust_analyzer.clone() {
-            tracing::debug!("[LSP] open_file: rust_analyzer present, calling setup_autocomplete_for_file for {:?}",
-                path.file_name());
-            input_state.update(cx, |state, cx| {
-                super::setup_autocomplete_for_file(
-                    state,
-                    path.clone(),
-                    workspace_root,
-                    analyzer,
-                    window,
-                    cx,
-                );
-            });
-        } else {
-            tracing::debug!(
-                "[LSP] open_file: rust_analyzer is NONE – LSP features will NOT work for {:?}",
-                path.file_name()
-            );
-            tracing::debug!("⚠️  rust-analyzer not available, completions will be limited");
-        }
-
-        let setup_time = setup_start.elapsed();
-        tracing::debug!(
-            "⚡ Editor setup completed in {:.2}ms",
-            setup_time.as_secs_f64() * 1000.0
-        );
-
-        let open_file = OpenFile {
-            path: path.clone(),
-            input_state: input_state.clone(),
-            is_modified: false,
-            lines_count,
-            file_size,
-            version: 1,
-            render_as_markdown: is_markdown,
-            markdown_preview_cache: if is_markdown {
-                content.clone()
-            } else {
+            Ok(content) => content,
+            Err(error) => {
+                tracing::warn!("Could not read {:?}: {}", path, error);
                 String::new()
-            },
-            last_markdown_render: if is_markdown {
-                Some(Instant::now())
-            } else {
-                None
-            },
-            pending_scroll_target: None,
+            }
         };
-
-        self.open_files.push(open_file);
-        let new_index = self.open_files.len() - 1;
-        self.current_file_index = Some(new_index);
-
-        // Queue panel to be added on next render
-        self.pending_panels_to_add
-            .push((new_index, path.clone(), input_state.clone()));
-
-        // Create subscription for this file
-        let analyzer = self.rust_analyzer.clone();
-        tracing::debug!(
-            "📝 Creating change subscription for {:?}, rust_analyzer present: {}",
-            path.file_name(),
-            analyzer.is_some()
-        );
-        let subscription = cx.subscribe(&input_state, move |this: &mut TextEditor, input_state_entity: Entity<InputState>, event: &InputEvent, cx: &mut Context<TextEditor>| {
-            match event {
-                InputEvent::Change => {
-                    // Find which file this corresponds to
-                    if let Some(index) = this.open_files.iter().position(|f| f.input_state == input_state_entity) {
-                        if let Some(file) = this.open_files.get_mut(index) {
-                            file.is_modified = true;
-                            file.version += 1;
-
-                            // Note: We no longer auto-update markdown preview here
-                            // User must click the refresh button to update preview
-
-                            // Notify rust-analyzer of the change (debounced:
-                            // full-document sync is expensive, so coalesce
-                            // bursts and only send the latest version).
-                            if let Some(ref analyzer) = analyzer {
-                                let path = file.path.clone();
-                                let version = file.version;
-                                let analyzer = analyzer.clone();
-
-                                tracing::debug!("📝 File changed: {:?} (version {}), scheduling debounced sync", path.file_name(), version);
-                                cx.spawn(async move |this, cx| {
-                                    const LSP_SYNC_DEBOUNCE: std::time::Duration =
-                                        std::time::Duration::from_millis(200);
-                                    cx.background_executor()
-                                        .timer(LSP_SYNC_DEBOUNCE)
-                                        .await;
-
-                                    this.update(cx, |this, cx| {
-                                        let file = this
-                                            .open_files
-                                            .iter()
-                                            .find(|f| f.path == path);
-                                        if file.map(|f| f.version) != Some(version) {
-                                            return; // Superseded by a newer edit.
-                                        }
-                                        if let Some(file) = file {
-                                            let content =
-                                                file.input_state.read(cx).value().to_string();
-                                            analyzer.update(cx, |analyzer, _cx| {
-                                                if let Err(e) = analyzer.did_change_file(
-                                                    &path, &content, version,
-                                                ) {
-                                                    tracing::error!("⚠️  Failed to notify rust-analyzer of file change: {}", e);
-                                                }
-                                            });
-                                        }
-                                    });
-                                })
-                                .detach();
-                            } else {
-                                if file.version == 2 {  // Only log once to avoid spam
-                                    tracing::debug!("⚠️  No rust-analyzer available for didChange");
-                                }
-                            }
-
-                            cx.notify();
-                        }
-                    }
-                },
-                InputEvent::GoToDefinition { path, line, character } => {
-                    // Navigate to the definition - emit an event so it can be handled
-                    // by the parent where we have window access
-                    tracing::debug!("🎯 Received GoToDefinition event: {:?} at {}:{}", path, line, character);
-
-                    // Emit the navigation event so it can be handled by parent components
-                    // that have window access
-                    let target_path = path.clone();
-                    let target_line = *line;
-                    let target_character = *character;
-
-                    // Store pending navigation in TextEditor
-                    this.pending_navigation = Some((target_path.clone(), target_line, target_character));
-
-                    cx.notify();
-                },
-                _ => {}
-            }
-        });
-
-        self.subscriptions.push(subscription);
-
-        // Emit event so rust-analyzer can be notified
-        cx.emit(TextEditorEvent::FileOpened {
-            path: path.clone(),
-            content: content.clone(),
-        });
-
-        // Log cache stats after opening
-        if let Some(index) = self.current_file_index {
-            if let Some(file) = self.open_files.get(index) {
-                let state = file.input_state.read(cx);
-                tracing::debug!(
-                    "📊 Line cache initialized - capacity: {} lines",
-                    state.line_cache_len()
-                );
-
-                // Log autocomplete configuration
-                if state.lsp.completion_provider.is_some() {
-                    tracing::debug!("✓ Autocomplete enabled with comprehensive provider");
-                } else {
-                    tracing::debug!("ℹ️  No autocomplete provider configured");
-                }
-            }
-        }
-
+        let view = self.create_view(&path, content.clone(), cx);
+        self.push_file(path.clone(), view, cx);
+        self.focus_current(window, cx);
+        cx.emit(TextEditorEvent::FileOpened { path, content });
         cx.notify();
     }
 
-    fn resolve_workspace_root_for_file(&self, path: &PathBuf) -> Option<PathBuf> {
-        let candidate = if path.is_file() {
-            path.parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| path.clone())
-        } else {
-            path.clone()
-        };
-
-        let mut current = candidate.as_path();
-        loop {
-            if current.join("Cargo.toml").exists() {
-                return Some(current.to_path_buf());
-            }
-            if let Some(parent) = current.parent() {
-                current = parent;
-            } else {
-                break;
-            }
-        }
-
-        Some(candidate)
-    }
-
-    fn get_language_from_extension(&self, path: &PathBuf) -> String {
-        languages::language_for_path(path).id.to_string()
-    }
-
-    /// Whether the currently active file has unsaved modifications.
-    fn current_file_dirty(&self) -> bool {
-        self.current_file_index
-            .and_then(|index| self.open_files.get(index))
-            .map(|file| file.is_modified)
-            .unwrap_or(false)
-    }
-
-    /// Get performance info about the current file
-    fn get_current_file_performance(&self, cx: &App) -> Option<String> {
-        if !self.show_performance_stats {
-            return None;
-        }
-
-        let index = self.current_file_index?;
-        let open_file = self.open_files.get(index)?;
-
-        let state = open_file.input_state.read(cx);
-        let cache_stats = state.line_cache_stats();
-
-        Some(format!(
-            "📊 Performance: {} lines | Cache: {:.1}% hit rate | {} cached lines | Memory: ~{} MB",
-            open_file.lines_count,
-            cache_stats.hit_rate() * 100.0,
-            state.line_cache_len(),
-            (state.line_cache_len() * 1024) / (1024 * 1024) // Rough estimate
-        ))
-    }
-
-    pub fn close_file(&mut self, index: usize, _window: &mut Window, cx: &mut Context<Self>) {
-        if index < self.open_files.len() {
-            let file_path = self.open_files[index].path.clone();
-            self.open_files.remove(index);
-
-            // Emit event so rust-analyzer can be notified
-            cx.emit(TextEditorEvent::FileClosed { path: file_path });
-
-            // Adjust current file index
-            if let Some(current) = self.current_file_index {
-                if current == index {
-                    // Closed the current file
-                    if self.open_files.is_empty() {
-                        self.current_file_index = None;
-                    } else if index == self.open_files.len() {
-                        // Closed the last file, select the previous one
-                        self.current_file_index = Some(index.saturating_sub(1));
-                    } else {
-                        // Keep the same index (which now points to the next file)
-                        self.current_file_index = Some(index);
-                    }
-                } else if current > index {
-                    // Closed a file before the current one
-                    self.current_file_index = Some(current - 1);
-                }
-            }
-
-            cx.notify();
-        }
-    }
-
-    pub fn save_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if let Some(index) = self.current_file_index {
-            if let Some(open_file) = self.open_files.get_mut(index) {
-                // Get content from input state
-                let content = open_file.input_state.read(cx).value();
-
-                // Write to file
-                if let Ok(_) = fs::write(&open_file.path, content.as_str()) {
-                    open_file.is_modified = false;
-                    tracing::debug!("💾 File saved: {:?}", open_file.path);
-
-                    // Emit event so rust-analyzer can be notified
-                    cx.emit(TextEditorEvent::FileSaved {
-                        path: open_file.path.clone(),
-                        content: content.to_string(),
-                    });
-
-                    cx.notify();
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    pub fn close_current_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            self.request_close_file(index, window, cx);
-        }
-    }
-
-    /// Close the file at `index`, prompting for confirmation when it has
-    /// unsaved changes.
-    fn request_close_file(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let (modified, name) = match self.open_files.get(index) {
-            Some(file) => (
-                file.is_modified,
-                file.path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("untitled")
-                    .to_string(),
-            ),
-            None => return,
-        };
-
-        if !modified {
-            self.close_file(index, window, cx);
-            return;
-        }
-
-        let entity = cx.entity().downgrade();
-        let title = t!("CodeEditor.UnsavedTitle").to_string();
-        let message = t!("CodeEditor.UnsavedMessage", name = name).to_string();
-
-        window.open_modal(cx, move |modal, _window, _cx| {
-            let entity = entity.clone();
-            modal
-                .title(title.clone())
-                .child(div().text_sm().child(message.clone()))
-                .footer(move |_, _, _, _| {
-                    vec![
-                        Button::new("save-and-close")
-                            .label(t!("CodeEditor.SaveAndClose").to_string())
-                            .primary()
-                            .on_click({
-                                let entity = entity.clone();
-                                move |_, window, cx| {
-                                    if let Some(entity) = entity.upgrade() {
-                                        entity.update(cx, |editor, cx| {
-                                            if editor.save_current_file(window, cx) {
-                                                editor.close_file(index, window, cx);
-                                            }
-                                        });
-                                    }
-                                    window.close_modal(cx);
-                                }
-                            }),
-                        Button::new("discard-close")
-                            .label(t!("CodeEditor.Discard").to_string())
-                            .danger()
-                            .on_click({
-                                let entity = entity.clone();
-                                move |_, window, cx| {
-                                    if let Some(entity) = entity.upgrade() {
-                                        entity.update(cx, |editor, cx| {
-                                            editor.close_file(index, window, cx);
-                                        });
-                                    }
-                                    window.close_modal(cx);
-                                }
-                            }),
-                        Button::new("cancel-close")
-                            .label(t!("CodeEditor.Cancel").to_string())
-                            .on_click(|_, window, cx| {
-                                window.close_modal(cx);
-                            }),
-                    ]
-                })
-        });
-    }
-
-    /// Navigate to a specific line and column in the current file
-    pub fn go_to_line(
-        &mut self,
-        line: usize,
-        column: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(index) = self.current_file_index {
-            if let Some(open_file) = self.open_files.get_mut(index) {
-                // Store the pending scroll target in case layout isn't ready yet
-                open_file.pending_scroll_target = Some((line, column));
-
-                open_file.input_state.update(cx, |state, cx| {
-                    // LSP Position uses 'line' and 'character' fields (0-based)
-                    // Our UI uses 1-based line numbers
-                    use ui::input::Position;
-                    state.set_cursor_position(
-                        Position {
-                            line: (line.saturating_sub(1)) as u32,
-                            character: (column.saturating_sub(1)) as u32,
-                        },
-                        window,
-                        cx,
-                    );
-
-                    tracing::debug!("📍 Navigated to line {}, column {}", line, column);
-
-                    // Force an additional notify to ensure scroll is processed
-                    cx.notify();
-                });
-
-                // Notify at the TextEditor level as well to ensure render is triggered
-                cx.notify();
-            }
-        }
-    }
-
-    /// Get the current file path if any
-    pub fn current_file_path(&self) -> Option<PathBuf> {
-        self.current_file_index
-            .and_then(|index| self.open_files.get(index))
-            .map(|file| file.path.clone())
-    }
-
-    /// Get the current scroll offset of the active file's input state
-    pub fn get_current_scroll_offset(&self, cx: &mut Context<Self>) -> Option<Point<Pixels>> {
-        self.current_file_index
-            .and_then(|index| self.open_files.get(index))
-            .map(|file| file.input_state.read(cx).get_scroll_offset())
-    }
-
-    /// Set the scroll offset for the active file's input state
-    pub fn set_scroll_offset(&mut self, offset: Point<Pixels>, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            if let Some(file) = self.open_files.get(index) {
-                file.input_state.update(cx, |state, cx| {
-                    state.set_scroll_offset(offset, cx);
-                });
-            }
-        }
-    }
-
-    /// Process pending navigation request (called from render where we have window access)
-    fn process_pending_navigation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((path, line, character)) = self.pending_navigation.take() {
-            tracing::debug!(
-                "🎯 Processing pending navigation to {:?} at {}:{}",
-                path,
-                line,
-                character
-            );
-
-            // Check if file is already open
-            let file_index = self.open_files.iter().position(|f| f.path == path);
-
-            if let Some(index) = file_index {
-                // File is already open, switch to it
-                self.current_file_index = Some(index);
-                tracing::debug!("✓ Switched to already-open file {:?}", path);
-            } else {
-                // Need to open the file first
-                tracing::debug!("📂 Opening file {:?}", path);
-                self.open_file(path.clone(), window, cx);
-                tracing::debug!(
-                    "✓ File opened, current_file_index: {:?}",
-                    self.current_file_index
-                );
-            }
-
-            // Now navigate to the specific position
-            // LSP positions are 0-based, go_to_line expects 1-based line numbers
-            // and will convert back to 0-based internally
-            let target_line = (line + 1) as usize; // Convert 0-based to 1-based
-            let target_col = (character + 1) as usize; // Convert 0-based to 1-based
-
-            tracing::debug!(
-                "🎯 Calling go_to_line with line {} (LSP: {}), column {} (LSP: {})",
-                target_line,
-                line,
-                target_col,
-                character
-            );
-
-            self.go_to_line(target_line, target_col, window, cx);
-
-            cx.notify();
-        }
-    }
-
-    /// Process any pending scroll targets (called from render after layout is ready)
-    fn process_pending_scroll_targets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.current_file_index {
-            if let Some(open_file) = self.open_files.get_mut(index) {
-                if let Some((line, column)) = open_file.pending_scroll_target {
-                    // Try to scroll - if layout isn't ready, set_cursor_position will handle it gracefully
-                    // We'll keep trying on subsequent frames until it works
-                    tracing::debug!(
-                        "📜 Attempting to scroll to line {}, column {}",
-                        line,
-                        column
-                    );
-
-                    let scroll_attempted = open_file.input_state.update(cx, |state, cx| {
-                        use ui::input::Position;
-                        state.set_cursor_position(
-                            Position {
-                                line: (line.saturating_sub(1)) as u32,
-                                character: (column.saturating_sub(1)) as u32,
-                            },
-                            window,
-                            cx,
-                        );
-                        // Return true to indicate we tried
-                        true
-                    });
-
-                    if scroll_attempted {
-                        // Clear the pending scroll target - even if it didn't fully work,
-                        // set_cursor_position was called which should set deferred scroll
-                        open_file.pending_scroll_target = None;
-                        tracing::debug!("✓ Scroll target cleared");
-                    }
-                }
-            }
-        }
-    }
-
-    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_markdown_file = if let Some(index) = self.current_file_index {
-            self.open_files
-                .get(index)
-                .map(|f| f.render_as_markdown)
-                .unwrap_or(false)
-        } else {
-            false
-        };
-
-        let separator = || {
-            div()
-                .w_px()
-                .h_4()
-                .mx_1()
-                .bg(cx.theme().border)
-                .rounded_full()
-        };
-
-        h_flex()
-            .w_full()
-            .px_2()
-            .py_1p5()
-            .bg(cx.theme().secondary)
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .justify_between()
-            .items_center()
-            .child(
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(
-                        Button::new("new_file")
-                            .icon(IconName::Plus)
-                            .tooltip(t!("CodeEditor.NewFileShortcut").to_string())
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.create_new_file(window, cx);
-                            })),
-                    )
-                    .child(if self.current_file_dirty() {
-                        Button::new("save")
-                            .icon(IconName::FloppyDisk)
-                            .tooltip(t!("CodeEditor.Save").to_string())
-                            .ghost()
-                            .small()
-                            .text_color(cx.theme().accent)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.save_current_file(window, cx);
-                            }))
-                    } else {
-                        Button::new("save")
-                            .icon(IconName::FloppyDisk)
-                            .tooltip(t!("CodeEditor.Save").to_string())
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.save_current_file(window, cx);
-                            }))
-                    })
-                    .child(separator())
-                    .children(if is_markdown_file {
-                        Some(
-                            Button::new("refresh_preview")
-                                .icon(IconName::Refresh)
-                                .tooltip(t!("CodeEditor.RefreshPreview").to_string())
-                                .ghost()
-                                .small()
-                                .on_click(cx.listener(|this, _, _window, cx| {
-                                    this.refresh_markdown_preview(cx);
-                                })),
-                        )
-                    } else {
-                        None
-                    })
-                    .child(
-                        Button::new("find")
-                            .icon(IconName::Search)
-                            .tooltip(t!("CodeEditor.Find").to_string())
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.show_find_dialog(window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("replace")
-                            .icon(IconName::Replace)
-                            .tooltip(t!("CodeEditor.Replace").to_string())
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.show_replace_dialog(window, cx);
-                            })),
-                    )
-                    .child(separator())
-                    .child({
-                        let mut stats = Button::new("toggle_stats")
-                            .icon(IconName::Activity)
-                            .tooltip(t!("CodeEditor.PerfStats").to_string())
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                this.show_performance_stats = !this.show_performance_stats;
-                                cx.notify();
-                            }));
-                        if self.show_performance_stats {
-                            stats = stats.text_color(cx.theme().accent);
-                        }
-                        stats
-                    }),
-            )
-            .child(
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(
-                        Button::new("run")
-                            .icon(IconName::Play)
-                            .tooltip(t!("CodeEditor.RunScript").to_string())
-                            .ghost()
-                            .small()
-                            .text_color(cx.theme().success)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.run_current_file(window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("debug")
-                            .icon(IconName::Bug)
-                            .tooltip(t!("CodeEditor.DebugScript").to_string())
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.debug_current_file(window, cx);
-                            })),
-                    ),
-            )
-    }
-
-    fn render_editor_content(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(index) = self.current_file_index {
-            if let Some(open_file) = self.open_files.get(index) {
-                // If it's a markdown file, render split view with editor on left and preview on right
-                if open_file.render_as_markdown {
-                    // Use cached markdown content to avoid re-rendering on every frame
-                    let preview_content = &open_file.markdown_preview_cache;
-
-                    return h_resizable("markdown-split")
-                        .state(self.markdown_split_state.clone())
-                        .child(
-                            // Left panel: Text editor for editing markdown
-                            resizable_panel().size(px(400.)).child(
-                                div()
-                                    .size_full()
-                                    .overflow_hidden()
-                                    .border_r_1()
-                                    .border_color(cx.theme().border)
-                                    .child(
-                                        TextInput::new(&open_file.input_state)
-                                            .h_full()
-                                            .w_full()
-                                            .font_family("JetBrains Mono")
-                                            .font(gpui::Font {
-                                                family: "JetBrains Mono".to_string().into(),
-                                                weight: gpui::FontWeight::NORMAL,
-                                                style: gpui::FontStyle::Normal,
-                                                features: gpui::FontFeatures::default(),
-                                                fallbacks: Some(gpui::FontFallbacks::from_fonts(
-                                                    vec!["monospace".to_string()],
-                                                )),
-                                            })
-                                            .text_size(px(14.0))
-                                            .border_0(),
-                                    ),
-                            ),
-                        )
-                        .child(
-                            // Right panel: Debounced markdown preview (only updates every 300ms)
-                            resizable_panel().child({
-                                if !preview_content.is_empty() {
-                                    div()
-                                        .id("markdown-preview-panel")
-                                        .size_full()
-                                        .overflow_y_scroll()
-                                        .p_5()
-                                        .bg(cx.theme().background)
-                                        .font_family("JetBrains Mono")
-                                        .font(gpui::Font {
-                                            family: "JetBrains Mono".to_string().into(),
-                                            weight: gpui::FontWeight::NORMAL,
-                                            style: gpui::FontStyle::Normal,
-                                            features: gpui::FontFeatures::default(),
-                                            fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
-                                                "monospace".to_string(),
-                                            ])),
-                                        })
-                                        .child({
-                                            let preview_content =
-                                                Self::truncated_markdown_preview(preview_content);
-                                            TextView::markdown(
-                                                "md-viewer",
-                                                preview_content,
-                                                window,
-                                                cx,
-                                            )
-                                            .selectable()
-                                        })
-                                } else {
-                                    div()
-                                        .id("markdown-preview-panel")
-                                        .size_full()
-                                        .overflow_y_scroll()
-                                        .p_5()
-                                        .bg(cx.theme().background)
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .gap_3()
-                                                .items_center()
-                                                .justify_center()
-                                                .size_full()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(div().text_sm().child(
-                                                    t!("CodeEditor.MarkdownReady").to_string(),
-                                                ))
-                                                .child(div().text_xs().child(
-                                                    t!("CodeEditor.RefreshHint").to_string(),
-                                                )),
-                                        )
-                                }
-                            }),
-                        )
-                        .into_any_element();
-                }
-
-                // Otherwise render as text editor
-                div()
-                    .size_full()
-                    .overflow_hidden()
-                    .child(
-                        TextInput::new(&open_file.input_state)
-                            .h_full()
-                            .w_full()
-                            .font_family("JetBrains Mono")
-                            .font(gpui::Font {
-                                family: "JetBrains Mono".to_string().into(),
-                                weight: gpui::FontWeight::NORMAL,
-                                style: gpui::FontStyle::Normal,
-                                features: gpui::FontFeatures::default(),
-                                fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
-                                    "monospace".to_string()
-                                ])),
-                            })
-                            .text_size(px(14.0))
-                            .border_0(),
-                    )
-                    .into_any_element()
-            } else {
-                self.render_empty_editor(cx)
-            }
-        } else {
-            self.render_empty_editor(cx)
-        }
-    }
-
-    fn render_empty_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(cx.theme().background)
-            .child(
-                v_flex()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        Icon::new(IconName::CodeBrackets)
-                            .size(px(56.))
-                            .text_color(cx.theme().muted_foreground)
-                            .opacity(0.5),
-                    )
-                    .child(
-                        div()
-                            .text_2xl()
-                            .font_semibold()
-                            .text_color(cx.theme().foreground)
-                            .child(t!("CodeEditor.Welcome").to_string()),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .text_center()
-                            .child(t!("CodeEditor.OpenFileHint").to_string()),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .mt_4()
-                            .child(
-                                Button::new("new_file_welcome")
-                                    .label(t!("CodeEditor.NewFile").to_string())
-                                    .icon(IconName::Plus)
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.create_new_file(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("open_folder_welcome")
-                                    .label(t!("CodeEditor.OpenFolder").to_string())
-                                    .icon(IconName::FolderOpen)
-                                    .primary()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open_folder_dialog(window, cx);
-                                    })),
-                            ),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (file_info, cache_info) = if let Some(index) = self.current_file_index {
-            if let Some(open_file) = self.open_files.get(index) {
-                let filename = open_file
-                    .path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("untitled")
-                    .to_string();
-                let language = self.get_language_from_extension(&open_file.path);
-
-                // Get cache statistics and live cursor position
-                let state = open_file.input_state.read(cx);
-                let cache_stats = state.line_cache_stats();
-                let cache_size = state.line_cache_len();
-                let cursor = state.cursor_position();
-                let cursor_str = format!("Ln {}, Col {}", cursor.line + 1, cursor.character + 1);
-
-                let dirty_marker = if open_file.is_modified { "● " } else { "" };
-
-                let file_size_kb = open_file.file_size / 1024;
-                let file_info_str = if file_size_kb > 1024 {
-                    format!(
-                        "{}{} | {} lines | {:.1} MB",
-                        dirty_marker,
-                        filename,
-                        open_file.lines_count,
-                        file_size_kb as f64 / 1024.0
-                    )
-                } else {
-                    format!(
-                        "{}{} | {} lines | {} KB",
-                        dirty_marker, filename, open_file.lines_count, file_size_kb
-                    )
-                };
-
-                let cache_info_str = if self.show_performance_stats {
-                    format!(
-                        "Cache: {}/{} lines | Hit Rate: {:.1}% | Hits: {} | Misses: {}",
-                        cache_size,
-                        cache_stats.hits + cache_stats.misses,
-                        cache_stats.hit_rate() * 100.0,
-                        cache_stats.hits,
-                        cache_stats.misses
-                    )
-                } else {
-                    format!("Cache: {} lines cached", cache_size)
-                };
-
-                ((file_info_str, language, cursor_str), cache_info_str)
-            } else {
-                (
-                    ("No file".to_string(), "".to_string(), "".to_string()),
-                    "".to_string(),
-                )
-            }
-        } else {
-            (
-                ("No file".to_string(), "".to_string(), "".to_string()),
-                "".to_string(),
-            )
-        };
-
-        let dirty = self.current_file_dirty();
-        let v_sep = || div().w_px().h_3().bg(cx.theme().border).rounded_full();
-
-        h_flex()
-            .w_full()
-            .min_h_6()
-            .px_3()
-            .py_1()
-            .bg(cx.theme().secondary)
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .justify_between()
-            .items_center()
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .child(
-                h_flex()
-                    .gap_2p5()
-                    .items_center()
-                    .children(dirty.then(|| {
-                        div()
-                            .size_1p5()
-                            .rounded_full()
-                            .bg(cx.theme().warning)
-                            .into_any_element()
-                    }))
-                    .child(file_info.0)
-                    .child(v_sep())
-                    .child(t!("CodeEditor.Utf8").to_string())
-                    .child(t!("CodeEditor.Lf").to_string()),
-            )
-            .child({
-                let mut flex = h_flex().gap_2p5().items_center();
-
-                if self.show_performance_stats {
-                    flex = flex.child(cache_info.clone()).child(v_sep());
-                }
-
-                flex.child(file_info.2)
-                    .child(v_sep())
-                    .child(t!("CodeEditor.Spaces4").to_string())
-                    .child(v_sep())
-                    .child(div().text_color(cx.theme().foreground).child(file_info.1))
-            })
-    }
-
-    /// Load content directly into the editor without opening from disk
-    /// This is used for diff mode where content is provided programmatically
-    pub fn load_content(
-        &mut self,
-        path: PathBuf,
-        content: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.load_content_with_diff_highlight(path, content, None, window, cx);
-    }
-
-    /// Load content with optional diff highlighting
-    /// other_content is used to compute which lines are added/removed
     pub fn load_content_with_diff_highlight(
         &mut self,
         path: PathBuf,
         content: String,
-        other_content: Option<(String, bool)>, // (other_content, is_before)
-        window: &mut Window,
+        other_content: Option<(String, bool)>,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // In diff mode, we want to replace the current file rather than accumulate multiple files
-        // Check if we should reuse the first file slot (for diff mode)
-        let should_replace = other_content.is_some() && !self.open_files.is_empty();
-
-        if should_replace {
-            // Replace the first (and only) file in diff mode
-            if let Some(file) = self.open_files.get_mut(0) {
-                file.path = path.clone();
-
-                // Update language for syntax highlighting
-                let language = path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| match ext {
-                        "rs" => "rust",
-                        "js" | "jsx" => "javascript",
-                        "ts" | "tsx" => "typescript",
-                        "py" => "python",
-                        "go" => "go",
-                        "c" | "h" => "c",
-                        "cpp" | "cc" | "cxx" | "hpp" => "cpp",
-                        "java" => "java",
-                        "json" => "json",
-                        "toml" => "toml",
-                        "yaml" | "yml" => "yaml",
-                        "md" => "markdown",
-                        "html" | "htm" => "html",
-                        "css" => "css",
-                        "xml" => "xml",
-                        "sh" | "bash" => "bash",
-                        _ => "plaintext",
+        let (diff_lines, diff_removed) = match other_content {
+            Some((other, current_is_original)) => {
+                let (original, modified) = if current_is_original {
+                    (content.clone(), other)
+                } else {
+                    (other, content.clone())
+                };
+                let original = mockaco_core::Document::new(original);
+                let mut diff = DiffSplitSurface::new(&original.snapshot(), modified);
+                let diff_row_count = diff.diff().rows().len().max(1);
+                diff.set_viewport(diff_row_count);
+                let lines: HashSet<usize> = diff
+                    .diff()
+                    .rows()
+                    .iter()
+                    .filter(|row| row.kind != DiffRowKind::Equal)
+                    .filter_map(|row| {
+                        if current_is_original {
+                            row.original.as_ref().map(|line| line.line)
+                        } else {
+                            row.modified.as_ref().map(|line| line.line)
+                        }
                     })
-                    .unwrap_or("plaintext");
-
-                file.input_state.update(cx, |state, cx| {
-                    // Update language/highlighter for the new file
-                    state.set_highlighter(language, cx);
-                    state.set_value(&content, window, cx);
-
-                    // Apply diff highlighting if other_content is provided
-                    if let Some((other, is_before)) = &other_content {
-                        Self::apply_diff_highlighting(
-                            state, &content, other, *is_before, window, cx,
-                        );
-                    }
-                });
-                file.is_modified = false;
-                file.lines_count = content.lines().count();
-                file.file_size = content.len();
-                self.current_file_index = Some(0);
-                tracing::debug!("TextEditor: Replaced file slot 0 with {:?}", path);
+                    .collect();
+                (lines, current_is_original)
             }
-        } else if let Some(index) = self.open_files.iter().position(|f| f.path == path) {
-            // File already open at a different index, just set its content
-            self.current_file_index = Some(index);
-            if let Some(file) = self.open_files.get_mut(index) {
-                file.input_state.update(cx, |state, cx| {
-                    state.set_value(&content, window, cx);
+            None => (HashSet::new(), false),
+        };
 
-                    // Apply diff highlighting if other_content is provided
-                    if let Some((other, is_before)) = &other_content {
-                        Self::apply_diff_highlighting(
-                            state, &content, other, *is_before, window, cx,
-                        );
-                    }
-                });
-                file.is_modified = false;
-            }
-        } else {
-            // Detect language from file extension for syntax highlighting
-            let language = languages::language_for_path(&path).id;
+        let tint = {
+            let theme = cx.theme();
+            let base = if diff_removed { theme.danger } else { theme.success };
+            with_alpha(surface_color_from_hsla(base), 115)
+        };
+        let backgrounds: HashMap<usize, SurfaceColor> =
+            diff_lines.into_iter().map(|line| (line, tint)).collect();
 
-            // Create new file entry with provided content
-            let input_state = cx.new(|cx| {
-                let mut state = InputState::new(window, cx)
-                    .multi_line()
-                    .code_editor(language)
-                    .line_number(true)
-                    .tab_size(TabSize {
-                        tab_size: 4,
-                        hard_tabs: false,
-                    });
-                state.set_value(&content, window, cx);
-
-                // Apply diff highlighting if other_content is provided
-                if let Some((other, is_before)) = &other_content {
-                    Self::apply_diff_highlighting(
-                        &mut state, &content, other, *is_before, window, cx,
-                    );
-                }
-
-                state
+        if let Some(index) = self.open_files.iter().position(|file| file.path == path) {
+            let file = &mut self.open_files[index];
+            file.is_modified = false;
+            file.view.update(cx, |view, cx| {
+                view.replace_text(content, cx);
+                view.set_line_backgrounds(backgrounds, cx);
             });
-
-            let file = OpenFile {
-                path: path.clone(),
-                input_state: input_state.clone(),
-                is_modified: false,
-                lines_count: content.lines().count(),
-                file_size: content.len(),
-                version: 1,
-                render_as_markdown: false,
-                markdown_preview_cache: String::new(),
-                last_markdown_render: None,
-                pending_scroll_target: None,
-            };
-
-            self.open_files.push(file);
-            self.current_file_index = Some(self.open_files.len() - 1);
+            self.current_file_index = Some(index);
+        } else {
+            let view = self.create_view(&path, content, cx);
+            view.update(cx, |view, cx| view.set_line_backgrounds(backgrounds, cx));
+            self.push_file(path, view, cx);
         }
-
         cx.notify();
     }
 
-    /// Apply diff highlighting to an InputState with proper alignment
-    fn apply_diff_highlighting(
-        state: &mut InputState,
-        this_content: &str,
-        other_content: &str,
-        is_before: bool,
-        window: &mut Window,
-        cx: &mut Context<InputState>,
-    ) {
-        use similar::{ChangeTag, TextDiff};
-
-        // Use the 'similar' crate's Myers diff algorithm
-        let diff = TextDiff::from_lines(
-            if is_before {
-                this_content
-            } else {
-                other_content
-            },
-            if is_before {
-                other_content
-            } else {
-                this_content
-            },
-        );
-
-        let mut aligned_content = String::new();
-        let mut line_highlights = Vec::new();
-
-        for change in diff.iter_all_changes() {
-            let line = change.to_string_lossy();
-
-            match change.tag() {
-                ChangeTag::Equal => {
-                    // Line exists in both - no highlight
-                    aligned_content.push_str(&line);
-                    if !line.ends_with('\n') {
-                        aligned_content.push('\n');
-                    }
-                    line_highlights.push(ui::input::LineHighlight::None);
-                }
-                ChangeTag::Delete => {
-                    if is_before {
-                        // This is the "before" view, show the deleted line
-                        aligned_content.push_str(&line);
-                        if !line.ends_with('\n') {
-                            aligned_content.push('\n');
-                        }
-                        line_highlights.push(ui::input::LineHighlight::Removed);
-                    } else {
-                        // This is the "after" view, insert blank line for alignment
-                        aligned_content.push('\n');
-                        line_highlights.push(ui::input::LineHighlight::None);
-                    }
-                }
-                ChangeTag::Insert => {
-                    if !is_before {
-                        // This is the "after" view, show the inserted line
-                        aligned_content.push_str(&line);
-                        if !line.ends_with('\n') {
-                            aligned_content.push('\n');
-                        }
-                        line_highlights.push(ui::input::LineHighlight::Added);
-                    } else {
-                        // This is the "before" view, insert blank line for alignment
-                        aligned_content.push('\n');
-                        line_highlights.push(ui::input::LineHighlight::None);
-                    }
-                }
+    fn save_file_at(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+        let Some(file) = self.open_files.get(index) else {
+            return false;
+        };
+        let path = file.path.clone();
+        let content = file.view.read(cx).text();
+        match fs::write(&path, &content) {
+            Ok(()) => {
+                self.open_files[index].is_modified = false;
+                cx.emit(TextEditorEvent::FileSaved { path, content });
+                cx.notify();
+                true
+            }
+            Err(error) => {
+                tracing::error!("Could not save {:?}: {}", path, error);
+                false
             }
         }
+    }
 
-        // Update the content with aligned version
-        state.set_value(&aligned_content, window, cx);
-        state.set_line_highlights(line_highlights);
+    pub fn save_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
+        match self.current_file_index {
+            Some(index) => self.save_file_at(index, cx),
+            None => false,
+        }
+    }
+
+    pub fn close_current_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.current_file_index else {
+            return;
+        };
+        if self.open_files[index].is_modified {
+            return;
+        }
+        let file = self.open_files.remove(index);
+        cx.emit(TextEditorEvent::FileClosed { path: file.path });
+        self.current_file_index = if self.open_files.is_empty() {
+            None
+        } else {
+            Some(index.min(self.open_files.len() - 1))
+        };
+        self.focus_current(window, cx);
+        cx.notify();
+    }
+
+    /// Moves the caret to a 1-based line/column and centers it.
+    pub fn go_to_line(
+        &mut self,
+        line: usize,
+        column: usize,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(file) = self.current_file() {
+            file.view.update(cx, |view, cx| {
+                view.go_to(line.saturating_sub(1), column.saturating_sub(1), cx)
+            });
+        }
+    }
+
+    pub fn current_file_path(&self) -> Option<PathBuf> {
+        self.current_file().map(|file| file.path.clone())
+    }
+
+    pub fn get_current_scroll_offset(&self, cx: &mut Context<Self>) -> Option<Point<Pixels>> {
+        let file = self.current_file()?;
+        let (x, y) = file.view.read(cx).scroll_offset();
+        Some(point(px(x), px(y)))
+    }
+
+    pub fn set_scroll_offset(&mut self, offset: Point<Pixels>, cx: &mut Context<Self>) {
+        if let Some(file) = self.current_file() {
+            file.view.update(cx, |view, cx| {
+                view.set_scroll_offset(offset.x.to_f32(), offset.y.to_f32(), cx)
+            });
+        }
+    }
+
+    fn current_file(&self) -> Option<&OpenFile> {
+        self.current_file_index
+            .and_then(|index| self.open_files.get(index))
+    }
+
+    fn focus_current(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(file) = self.current_file() {
+            let handle = file.view.focus_handle(cx);
+            window.focus(&handle, cx);
+        }
+    }
+
+    fn with_view(
+        &mut self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut WgpuiEditorView, &mut Context<WgpuiEditorView>),
+    ) {
+        if let Some(file) = self.current_file() {
+            file.view.update(cx, f);
+        }
+    }
+
+    /// Writes a ~1,000,000-line Rust file to the temp directory on a
+    /// background thread and opens it, to stress-test the editor.
+    pub fn generate_stress_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.generating {
+            return;
+        }
+        self.generating = true;
+        cx.notify();
+        let task = cx.background_spawn(async move {
+            let path = std::env::temp_dir().join("pulsar_mockaco_1m_lines.rs");
+            let result = write_stress_file(&path, 1_000_000).map(|_| path);
+            result
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.generating = false;
+                match result {
+                    Ok(path) => this.open_file(path, window, cx),
+                    Err(error) => {
+                        tracing::error!("Could not generate stress file: {}", error);
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Pushes the active UI theme into every open editor when it changes.
+    fn apply_theme(&mut self, cx: &mut Context<Self>) {
+        let theme = surface_theme(cx.theme());
+        if self.applied_theme.as_ref() == Some(&theme) {
+            return;
+        }
+        for file in &self.open_files {
+            file.view
+                .update(cx, |view, cx| view.set_theme(theme.clone(), cx));
+        }
+        self.applied_theme = Some(theme);
+    }
+}
+
+/// Generates varied, realistic Rust (structs, impls, enums, traits, tests,
+/// comments, strings, numbers) so highlighting and folding have real work.
+fn write_stress_file(path: &std::path::Path, target_lines: usize) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
+    let mut lines = 0usize;
+    let mut module = 0usize;
+    writeln!(out, "//! Generated stress file: {target_lines} lines.\n")?;
+    lines += 2;
+    while lines < target_lines {
+        let m = module;
+        module += 1;
+        let chunk = format!(
+            r#"/// Module {m} documentation.
+pub mod module_{m} {{
+    use std::collections::HashMap;
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Item{m} {{
+        pub id: u64,
+        pub name: String,
+        pub weight: f32,
+        pub tags: Vec<&'static str>,
+    }}
+
+    #[derive(Debug, Clone, Copy)]
+    pub enum Kind{m} {{
+        Small,
+        Large {{ factor: u32 }},
+        Custom(i64),
+    }}
+
+    pub trait Describe{m} {{
+        fn describe(&self) -> String;
+    }}
+
+    impl Describe{m} for Item{m} {{
+        fn describe(&self) -> String {{
+            // Build a human readable description.
+            format!("item {{}} ({{}}) weighs {{:.2}}", self.id, self.name, self.weight)
+        }}
+    }}
+
+    impl Item{m} {{
+        pub fn new(id: u64, name: &str) -> Self {{
+            Self {{
+                id,
+                name: name.to_string(),
+                weight: {m} as f32 * 0.5 + 1.25,
+                tags: vec!["generated", "stress"],
+            }}
+        }}
+
+        pub fn classify(&self) -> Kind{m} {{
+            match self.id % 3 {{
+                0 => Kind{m}::Small,
+                1 => Kind{m}::Large {{ factor: {m} }},
+                _ => Kind{m}::Custom(-(self.id as i64)),
+            }}
+        }}
+
+        /* Sum weights across a lookup table. */
+        pub fn total(table: &HashMap<u64, Item{m}>) -> f32 {{
+            let mut sum = 0.0;
+            for (key, item) in table {{
+                if *key % 2 == 0 {{
+                    sum += item.weight;
+                }} else {{
+                    sum -= 0.5;
+                }}
+            }}
+            sum
+        }}
+    }}
+
+    #[cfg(test)]
+    mod tests {{
+        use super::*;
+
+        #[test]
+        fn builds_item() {{
+            let item = Item{m}::new({m}, "sample");
+            assert_eq!(item.id, {m});
+            assert!(item.describe().contains("sample"));
+        }}
+    }}
+}}
+
+"#
+        );
+        out.write_all(chunk.as_bytes())?;
+        lines += chunk.bytes().filter(|b| *b == b'\n').count();
+    }
+    out.flush()
+}
+
+fn surface_color_from_hsla(color: Hsla) -> SurfaceColor {
+    let rgba: Rgba = color.into();
+    SurfaceColor::rgba(
+        (rgba.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
+fn with_alpha(color: SurfaceColor, alpha: u8) -> SurfaceColor {
+    SurfaceColor { alpha, ..color }
+}
+
+/// Mockaco token kinds mapped to the UI theme's syntax names, first match
+/// wins. Kinds the theme does not style keep Mockaco's built-in color.
+const SYNTAX_MAP: &[(&str, &[&str])] = &[
+    ("keyword", &["keyword"]),
+    ("keyword.operator", &["keyword", "operator"]),
+    ("function", &["function"]),
+    ("function.method", &["function"]),
+    ("function.macro", &["function", "preproc"]),
+    ("type", &["type", "enum"]),
+    ("type.builtin", &["type"]),
+    ("constructor", &["constructor", "type"]),
+    ("string", &["string"]),
+    ("character", &["string"]),
+    ("escape", &["string.escape", "string"]),
+    ("comment", &["comment"]),
+    ("comment.documentation", &["comment.doc", "comment"]),
+    ("constant", &["constant", "boolean"]),
+    ("constant.builtin", &["constant", "boolean"]),
+    ("number", &["number"]),
+    ("attribute", &["attribute"]),
+    ("property", &["property"]),
+    ("variable", &["variable"]),
+    ("variable.parameter", &["variable"]),
+    ("variable.builtin", &["variable.special", "variable"]),
+    ("operator", &["operator"]),
+    ("punctuation.bracket", &["punctuation.bracket", "punctuation"]),
+    ("punctuation.delimiter", &["punctuation.delimiter", "punctuation"]),
+    ("punctuation.list_marker", &["punctuation.list_marker", "punctuation"]),
+    ("label", &["label"]),
+    ("tag", &["tag"]),
+    ("title", &["title"]),
+    ("link_text", &["link_text"]),
+    ("link_uri", &["link_uri"]),
+    ("emphasis", &["emphasis"]),
+    ("emphasis.strong", &["emphasis.strong"]),
+];
+
+fn syntax_theme(theme: &ui::Theme) -> mockaco_language::Theme {
+    let mut syntax = SurfaceTheme::default().syntax;
+    for (kind, names) in SYNTAX_MAP {
+        for name in *names {
+            let Some(style) = theme.highlight_theme.style(name) else {
+                continue;
+            };
+            let Some(color) = style.color else {
+                continue;
+            };
+            let color = surface_color_from_hsla(color.solid);
+            syntax.set_token_style(
+                *kind,
+                mockaco_language::TokenStyle {
+                    foreground: mockaco_language::Rgba {
+                        red: color.red,
+                        green: color.green,
+                        blue: color.blue,
+                        alpha: color.alpha,
+                    },
+                    background: None,
+                    font: mockaco_language::FontStyle {
+                        bold: style.font_weight.is_some_and(|weight| weight >= FontWeight::SEMIBOLD),
+                        italic: matches!(style.font_style, Some(FontStyle::Italic)),
+                        underline: false,
+                    },
+                },
+            );
+            break;
+        }
+    }
+    syntax
+}
+
+fn surface_theme(theme: &ui::Theme) -> SurfaceTheme {
+    let editor = &theme.highlight_theme.style;
+    let active_line = editor
+        .editor_active_line
+        .map(surface_color_from_hsla)
+        .unwrap_or_else(|| with_alpha(surface_color_from_hsla(theme.list_active), 90));
+    let gutter_foreground = editor
+        .editor_line_number
+        .map(surface_color_from_hsla)
+        .unwrap_or_else(|| surface_color_from_hsla(theme.muted_foreground));
+    let background = surface_color_from_hsla(theme.background);
+    SurfaceTheme {
+        background,
+        gutter_background: background,
+        foreground: surface_color_from_hsla(theme.foreground),
+        gutter_foreground,
+        selection: surface_color_from_hsla(theme.selection),
+        primary_selection: surface_color_from_hsla(theme.selection),
+        caret: surface_color_from_hsla(theme.caret),
+        decoration: surface_color_from_hsla(theme.warning),
+        active_line,
+        syntax: syntax_theme(theme),
     }
 }
 
 impl EventEmitter<TextEditorEvent> for TextEditor {}
 
 impl Focusable for TextEditor {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        match self.current_file() {
+            Some(file) => file.view.focus_handle(cx),
+            None => self.focus_handle.clone(),
+        }
     }
 }
 
 impl Render for TextEditor {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Initialize workspace on first render
-        self.initialize_workspace_once(window, cx);
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.apply_theme(cx);
 
-        // Process any pending navigation requests (from go-to-definition)
-        self.process_pending_navigation(window, cx);
-
-        // Process any pending scroll targets (after layout is ready)
-        self.process_pending_scroll_targets(window, cx);
-
-        // Track render time for performance monitoring
-        let render_start = Instant::now();
-
-        let result = v_flex()
+        let tabs = self.open_files.iter().enumerate().fold(
+            h_flex()
+                .w_full()
+                .h(px(34.0))
+                .gap_1()
+                .border_b_1()
+                .border_color(cx.theme().border),
+            |tabs, (index, file)| {
+                let name = file
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Untitled");
+                let label = if file.is_modified {
+                    format!("{name} •")
+                } else {
+                    name.to_owned()
+                };
+                tabs.child(
+                    Button::new(format!("file-tab-{index}"))
+                        .label(label)
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.current_file_index = Some(index);
+                            this.focus_current(window, cx);
+                            cx.notify();
+                        })),
+                )
+            },
+        );
+        let dirty = self.current_file().is_some_and(|file| file.is_modified);
+        let toolbar = h_flex()
+            .w_full()
+            .h(px(36.0))
+            .px_2()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        self.current_file()
+                            .map(|file| file.path.display().to_string())
+                            .unwrap_or_default(),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Button::new("generate-stress-file")
+                            .label(if self.generating {
+                                "Generating…"
+                            } else {
+                                "Generate 1M-line Rust file"
+                            })
+                            .ghost()
+                            .small()
+                            .disabled(self.generating)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.generate_stress_file(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("save-file")
+                            .label(if dirty { "Save •" } else { "Save" })
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.save_current_file(window, cx);
+                            })),
+                    ),
+            );
+        let body = match self.current_file() {
+            Some(file) => div()
+                .id("editor-context-area")
+                .size_full()
+                .child(file.view.clone())
+                .context_menu(move |menu, _window, _cx| {
+                    menu.menu("Undo", Box::new(EditorUndo))
+                        .menu("Redo", Box::new(EditorRedo))
+                        .separator()
+                        .menu("Cut", Box::new(EditorCut))
+                        .menu("Copy", Box::new(EditorCopy))
+                        .menu("Paste", Box::new(EditorPaste))
+                        .separator()
+                        .menu("Select All", Box::new(EditorSelectAll))
+                        .menu("Unfold All", Box::new(EditorUnfoldAll))
+                        .separator()
+                        .menu("Save", Box::new(EditorSave))
+                        .menu("Copy File Path", Box::new(EditorCopyPath))
+                })
+                .into_any_element(),
+            None => v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .text_color(cx.theme().muted_foreground)
+                .child("Open a source file to begin editing")
+                .into_any_element(),
+        };
+        v_flex()
             .size_full()
             .bg(cx.theme().background)
-            .child(self.render_toolbar(cx))
-            .child(div().flex_1().min_h_0().overflow_hidden().child(
-                if let Some(ref workspace) = self.workspace {
-                    workspace.clone().into_any_element()
-                } else {
-                    div()
-                        .child(t!("CodeEditor.Loading").to_string())
-                        .into_any_element()
-                },
-            ))
-            .child(self.render_status_bar(cx));
-
-        // Log render time if performance stats are enabled
-        if self.show_performance_stats {
-            let render_time = render_start.elapsed();
-            if render_time.as_millis() > 16 {
-                tracing::error!(
-                    "⚠️  Slow render: {:.2}ms (target: 16ms for 60 FPS)",
-                    render_time.as_secs_f64() * 1000.0
-                );
-            }
-        }
-
-        self.last_render_time = Some(render_start);
-
-        result
+            .key_context("MockacoHost")
+            .on_action(cx.listener(|this, _: &EditorUndo, _, cx| this.with_view(cx, |v, cx| v.undo(cx))))
+            .on_action(cx.listener(|this, _: &EditorRedo, _, cx| this.with_view(cx, |v, cx| v.redo(cx))))
+            .on_action(cx.listener(|this, _: &EditorCut, _, cx| this.with_view(cx, |v, cx| v.cut(cx))))
+            .on_action(cx.listener(|this, _: &EditorCopy, _, cx| this.with_view(cx, |v, cx| v.copy(cx))))
+            .on_action(cx.listener(|this, _: &EditorPaste, _, cx| this.with_view(cx, |v, cx| v.paste(cx))))
+            .on_action(cx.listener(|this, _: &EditorSelectAll, _, cx| {
+                this.with_view(cx, |v, cx| v.select_all(cx))
+            }))
+            .on_action(cx.listener(|this, _: &EditorUnfoldAll, _, cx| {
+                this.with_view(cx, |v, cx| v.unfold_all(cx))
+            }))
+            .on_action(cx.listener(|this, _: &EditorSave, window, cx| {
+                this.save_current_file(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &EditorCopyPath, _, cx| {
+                if let Some(path) = this.current_file_path() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(
+                        path.to_string_lossy().into_owned(),
+                    ));
+                }
+            }))
+            .child(toolbar)
+            .child(tabs)
+            .child(div().flex_1().min_h_0().child(body))
     }
 }

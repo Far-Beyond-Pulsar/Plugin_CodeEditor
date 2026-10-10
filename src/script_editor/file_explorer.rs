@@ -1,20 +1,19 @@
+use gpui::{actions, prelude::FluentBuilder, *};
 use rust_i18n::t;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use gpui::{*, prelude::FluentBuilder, actions};
 use ui::{
+    ActiveTheme as _, Icon, IconName, Sizable as _, Size, StyledExt,
     button::{Button, ButtonVariants as _},
     context_menu::ContextMenuExt,
     h_flex,
-    v_flex,
     input::{InputEvent, InputState, TextInput},
     scroll::Scrollbar,
-    ActiveTheme as _, StyledExt, Sizable as _, Size,
-    IconName, Icon,
+    v_flex,
 };
-use serde::Deserialize;
-use schemars::JsonSchema;
 
 // Define actions for context menu
 actions!(
@@ -99,7 +98,11 @@ pub struct FileExplorer {
 impl FileExplorer {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Escape cancels an active inline rename (the input's own escape handler propagates here)
-        cx.bind_keys([KeyBinding::new("escape", CancelRename, Some("FileExplorer"))]);
+        cx.bind_keys([KeyBinding::new(
+            "escape",
+            CancelRename,
+            Some("FileExplorer"),
+        )]);
 
         Self {
             focus_handle: cx.focus_handle(),
@@ -161,30 +164,55 @@ impl FileExplorer {
         }
     }
 
-    fn on_copy_file_path(&mut self, _: &CopyFilePath, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_copy_file_path(
+        &mut self,
+        _: &CopyFilePath,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(path) = &self.selected_file {
             self.copy_path_to_clipboard(path, cx);
         }
     }
 
-    fn on_copy_relative_path(&mut self, _: &CopyRelativePath, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_copy_relative_path(
+        &mut self,
+        _: &CopyRelativePath,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(path) = &self.selected_file {
             self.copy_relative_path_to_clipboard(path, cx);
         }
     }
 
-    fn on_reveal_in_file_manager(&mut self, _: &RevealInFileManager, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_reveal_in_file_manager(
+        &mut self,
+        _: &RevealInFileManager,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
         if let Some(path) = &self.selected_file {
             self.reveal_in_file_manager(path);
         }
     }
 
-    fn on_new_file_here(&mut self, action: &NewFileHere, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_new_file_here(
+        &mut self,
+        action: &NewFileHere,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let path = PathBuf::from(&action.path);
         self.create_file_in_directory(path, window, cx);
     }
 
-    fn on_new_folder_here(&mut self, action: &NewFolderHere, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_new_folder_here(
+        &mut self,
+        action: &NewFolderHere,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let path = PathBuf::from(&action.path);
         self.create_folder_in_directory(path, window, cx);
     }
@@ -200,40 +228,40 @@ impl FileExplorer {
     fn refresh_file_tree(&mut self, _cx: &mut Context<Self>) {
         self.file_tree.clear();
         self.visible_entries.clear();
-        
+
         if let Some(root) = self.project_root.clone() {
             self.scan_directory(&root, 0);
             self.rebuild_visible_entries();
         }
-        
+
         // Mark that scroll needs updating
         self.needs_scroll_update = true;
     }
-    
+
     /// Rebuild the flat list of visible entries based on expansion states
     fn rebuild_visible_entries(&mut self) {
         self.visible_entries.clear();
-        
+
         for (idx, entry) in self.file_tree.iter().enumerate() {
             // Check if this entry should be visible based on parent expansion
             if self.is_entry_visible(idx) {
                 self.visible_entries.push(idx);
             }
         }
-        
+
         // Mark that scroll needs updating after tree structure change
         self.needs_scroll_update = true;
     }
-    
+
     /// Check if an entry is visible (all parents are expanded)
     fn is_entry_visible(&self, entry_idx: usize) -> bool {
         let entry = &self.file_tree[entry_idx];
-        
+
         // Root level is always visible
         if entry.depth == 0 {
             return true;
         }
-        
+
         // Check if parent is expanded
         if let Some(parent_path) = entry.path.parent() {
             // Find parent in file tree
@@ -241,18 +269,20 @@ impl FileExplorer {
                 if idx >= entry_idx {
                     break; // Parent must come before child
                 }
-                
+
                 if potential_parent.path == parent_path {
                     return potential_parent.is_expanded && self.is_entry_visible(idx);
                 }
             }
         }
-        
+
         false
     }
 
     fn scan_directory(&mut self, dir: &Path, depth: usize) {
-        if depth > 10 { return; } // Prevent infinite recursion
+        if depth > 10 {
+            return;
+        } // Prevent infinite recursion
 
         if let Ok(entries) = fs::read_dir(dir) {
             let mut dirs = Vec::new();
@@ -305,8 +335,9 @@ impl FileExplorer {
 
     fn toggle_folder(&mut self, path: &Path, _window: &mut Window, cx: &mut Context<Self>) {
         let is_expanded = self.expanded_folders.get(path).copied().unwrap_or(false);
-        self.expanded_folders.insert(path.to_path_buf(), !is_expanded);
-        
+        self.expanded_folders
+            .insert(path.to_path_buf(), !is_expanded);
+
         // Update the file tree entry
         for entry in &mut self.file_tree {
             if entry.path == path {
@@ -314,10 +345,10 @@ impl FileExplorer {
                 break;
             }
         }
-        
+
         // Rebuild the file tree to reflect expansion changes
         self.refresh_file_tree(cx);
-        
+
         cx.notify();
     }
 
@@ -327,7 +358,10 @@ impl FileExplorer {
     }
 
     fn open_file_in_editor(&mut self, path: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
-        tracing::debug!("FileExplorer: open_file_in_editor called with path: {:?}", path);
+        tracing::debug!(
+            "FileExplorer: open_file_in_editor called with path: {:?}",
+            path
+        );
         self.selected_file = Some(path.clone());
         self.last_opened_file = Some(path.clone());
         cx.notify();
@@ -361,9 +395,9 @@ impl FileExplorer {
 
     /// Check if a folder contains any diff files (recursively)
     fn folder_contains_diff_files(&self, folder_path: &Path) -> bool {
-        self.diff_files.iter().any(|diff_path| {
-            diff_path.starts_with(folder_path)
-        })
+        self.diff_files
+            .iter()
+            .any(|diff_path| diff_path.starts_with(folder_path))
     }
 
     fn create_new_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -430,8 +464,13 @@ impl FileExplorer {
     }
 
     fn paste_file(&mut self, target_dir: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
-        if let (Some(source_path), Some(operation)) = (&self.clipboard_path, &self.clipboard_operation) {
-            let file_name = source_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        if let (Some(source_path), Some(operation)) =
+            (&self.clipboard_path, &self.clipboard_operation)
+        {
+            let file_name = source_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("file");
             let dest_path = target_dir.join(file_name);
 
             match operation {
@@ -451,7 +490,11 @@ impl FileExplorer {
                         if let Err(e) = self.copy_dir_recursive(source_path, &dest_path) {
                             tracing::error!("Failed to copy directory: {}", e);
                         } else {
-                            tracing::debug!("✓ Copied directory: {:?} -> {:?}", source_path, dest_path);
+                            tracing::debug!(
+                                "✓ Copied directory: {:?} -> {:?}",
+                                source_path,
+                                dest_path
+                            );
                             self.refresh_file_tree(cx);
                         }
                     } else {
@@ -530,10 +573,7 @@ impl FileExplorer {
 
         let subscription = cx.subscribe(
             &input,
-            |this: &mut Self,
-             _: Entity<InputState>,
-             event: &InputEvent,
-             cx: &mut Context<Self>| {
+            |this: &mut Self, _: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>| {
                 match event {
                     InputEvent::PressEnter { .. } => this.commit_rename(cx),
                     InputEvent::Blur => {
@@ -580,7 +620,10 @@ impl FileExplorer {
 
         if !Self::is_valid_entry_name(&new_name) {
             self.rename_invalid = true;
-            tracing::warn!("⚠️ Invalid name for rename, keeping editor open: {:?}", new_name);
+            tracing::warn!(
+                "⚠️ Invalid name for rename, keeping editor open: {:?}",
+                new_name
+            );
             cx.notify();
             return;
         }
@@ -618,12 +661,7 @@ impl FileExplorer {
                 self.scroll_to_entry(&new_path, cx);
             }
             Err(e) => {
-                tracing::error!(
-                    "Failed to rename {:?} -> {:?}: {}",
-                    old_path,
-                    new_path,
-                    e
-                );
+                tracing::error!("Failed to rename {:?} -> {:?}: {}", old_path, new_path, e);
                 self.finish_rename_session(cx);
             }
         }
@@ -638,12 +676,7 @@ impl FileExplorer {
             && !name.contains('\\')
     }
 
-    fn on_cancel_rename(
-        &mut self,
-        _: &CancelRename,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn on_cancel_rename(&mut self, _: &CancelRename, _window: &mut Window, cx: &mut Context<Self>) {
         if self.renaming_path.is_some() {
             tracing::debug!("✗ Rename cancelled");
             self.finish_rename_session(cx);
@@ -721,17 +754,20 @@ impl FileExplorer {
         #[cfg(target_os = "linux")]
         {
             if let Some(parent) = path.parent() {
-                let _ = std::process::Command::new("xdg-open")
-                    .arg(parent)
-                    .spawn();
+                let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
             }
         }
         tracing::debug!("📂 Revealed in file manager: {:?}", path);
     }
 
-    fn create_file_in_directory(&mut self, dir_path: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
+    fn create_file_in_directory(
+        &mut self,
+        dir_path: PathBuf,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let new_path = dir_path.join("new_file.txt");
-        
+
         // Create the file
         if let Ok(_) = fs::write(&new_path, "") {
             self.refresh_file_tree(cx);
@@ -740,9 +776,14 @@ impl FileExplorer {
         }
     }
 
-    fn create_folder_in_directory(&mut self, dir_path: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
+    fn create_folder_in_directory(
+        &mut self,
+        dir_path: PathBuf,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let new_path = dir_path.join("new_folder");
-        
+
         // Create the directory
         if let Ok(_) = fs::create_dir(&new_path) {
             self.refresh_file_tree(cx);
@@ -750,37 +791,42 @@ impl FileExplorer {
             self.start_rename(new_path, _window, cx);
         }
     }
-    
+
     /// Calculate which entries are visible in the viewport (virtualization)
-    fn calculate_visible_range(&self, scroll_offset: Pixels, viewport_height: Pixels) -> (usize, usize) {
+    fn calculate_visible_range(
+        &self,
+        scroll_offset: Pixels,
+        viewport_height: Pixels,
+    ) -> (usize, usize) {
         // Ensure we have a minimum viewport height
         let safe_viewport_height = viewport_height.max(px(100.0));
-        
+
         // Convert to float for division
         let scroll_f = -scroll_offset;
         let item_height_f = self.item_height;
-        
+
         let start_index = ((scroll_f / item_height_f).floor().max(0.0)) as usize;
         let visible_count = ((safe_viewport_height / item_height_f).ceil() as usize) + 4; // +4 for buffer
         let end_index = (start_index + visible_count).min(self.visible_entries.len());
-        
+
         (start_index, end_index)
     }
-    
+
     /// Get viewport height from last measured bounds, or use fallback
     fn get_viewport_height(&self) -> Pixels {
-        let height = self.last_viewport_bounds
+        let height = self
+            .last_viewport_bounds
             .map(|bounds| bounds.size.height)
             .unwrap_or(px(600.0)); // Fallback for first render
-        
+
         // Debug: print when using fallback
         if self.last_viewport_bounds.is_none() {
             tracing::debug!("⚠️  Using fallback viewport height: 600px");
         }
-        
+
         height
     }
-    
+
     /// Get viewport width from last measured bounds, or use fallback
     fn get_viewport_width(&self) -> Pixels {
         self.last_viewport_bounds
@@ -788,55 +834,61 @@ impl FileExplorer {
             .unwrap_or(px(250.0)) // Fallback for first render
     }
 
-    fn render_file_tree_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_file_tree_content(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         // Check for window size changes
         let window_size = window.viewport_size();
-        let size_changed = self.last_window_size
+        let size_changed = self
+            .last_window_size
             .map(|last_size| last_size != window_size)
             .unwrap_or(true);
-        
+
         if size_changed {
             self.last_window_size = Some(window_size);
             // Estimate viewport bounds based on window size
             // Account for header (~37px) and footer (~31px) chrome
             let estimated_height = (window_size.height - px(68.0)).max(px(200.0));
             let estimated_width = px(250.0); // Typical sidebar width
-            
+
             self.last_viewport_bounds = Some(Bounds {
                 origin: gpui::point(px(0.0), px(0.0)),
                 size: gpui::size(estimated_width, estimated_height),
             });
-            
+
             // Mark scroll for update with new bounds
             self.needs_scroll_update = true;
         }
-        
+
         // Use last known viewport bounds or fallback
         let viewport_height = self.get_viewport_height();
         let viewport_width = self.get_viewport_width();
-        
+
         // Create bounds from stored values
         let bounds = self.last_viewport_bounds.unwrap_or(Bounds {
             origin: gpui::point(px(0.0), px(0.0)),
             size: gpui::size(viewport_width, viewport_height),
         });
-        
+
         // Apply any pending scroll updates
         if self.needs_scroll_update {
             let current_offset = self.scroll_handle.offset();
             self.set_scroll_offset_clamped(current_offset, bounds.size.height);
             self.needs_scroll_update = false;
         }
-        
+
         let scroll_offset = self.scroll_handle.offset();
-        let (start_idx, end_idx) = self.calculate_visible_range(scroll_offset.y, bounds.size.height);
-        
+        let (start_idx, end_idx) =
+            self.calculate_visible_range(scroll_offset.y, bounds.size.height);
+
         // Total height of all items
         let total_height = self.item_height * self.visible_entries.len() as f32;
-        
+
         // Offset for virtualization
         let offset_y = self.item_height * start_idx as f32;
-        
+
         div()
             .id("file_tree_viewport")
             .relative()
@@ -848,7 +900,9 @@ impl FileExplorer {
                 weight: gpui::FontWeight::NORMAL,
                 style: gpui::FontStyle::Normal,
                 features: gpui::FontFeatures::default(),
-                fallbacks: Some(gpui::FontFallbacks::from_fonts(vec!["monospace".to_string()])),
+                fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
+                    "monospace".to_string(),
+                ])),
             })
             .child(
                 // Visible items container with absolute positioning for virtualization
@@ -859,14 +913,12 @@ impl FileExplorer {
                     .w_full()
                     .flex()
                     .flex_col()
-                    .children(
-                        (start_idx..end_idx)
-                            .filter_map(|visible_idx| {
-                                self.visible_entries.get(visible_idx)
-                                    .and_then(|&tree_idx| self.file_tree.get(tree_idx))
-                                    .map(|entry| self.render_file_item(entry, cx))
-                            })
-                    )
+                    .children((start_idx..end_idx).filter_map(|visible_idx| {
+                        self.visible_entries
+                            .get(visible_idx)
+                            .and_then(|&tree_idx| self.file_tree.get(tree_idx))
+                            .map(|entry| self.render_file_item(entry, cx))
+                    })),
             )
             .child(
                 // Scrollbar overlay
@@ -877,21 +929,23 @@ impl FileExplorer {
                     .bottom_0()
                     .w(px(12.0))
                     .child(
-                        Scrollbar::vertical(&self.scroll_state, &self.scroll_handle)
-                            .scroll_size(gpui::Size {
+                        Scrollbar::vertical(&self.scroll_state, &self.scroll_handle).scroll_size(
+                            gpui::Size {
                                 width: bounds.size.width,
                                 height: total_height,
-                            })
-                    )
+                            },
+                        ),
+                    ),
             )
     }
-    
+
     /// Update viewport bounds when window is resized or layout changes
     pub fn update_viewport_bounds(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
-        let bounds_changed = self.last_viewport_bounds
+        let bounds_changed = self
+            .last_viewport_bounds
             .map(|old_bounds| old_bounds.size != bounds.size)
             .unwrap_or(true);
-        
+
         if bounds_changed {
             self.last_viewport_bounds = Some(bounds);
             // Re-clamp scroll with new viewport size
@@ -922,7 +976,8 @@ impl FileExplorer {
         // Files: only clickable if diff file or not in diff mode
         // Folders: always clickable, but grey if no diff files
         let is_clickable = !in_diff_mode || is_directory || is_diff_file;
-        let should_grey = in_diff_mode && !is_diff_file && (!is_directory || !folder_has_diff_files);
+        let should_grey =
+            in_diff_mode && !is_diff_file && (!is_directory || !folder_has_diff_files);
 
         // Create a valid ID by hashing the path
         let item_id = SharedString::from(format!("file-{:x}", {
@@ -1040,65 +1095,76 @@ impl FileExplorer {
                 })
             })
     }
-    
-    fn on_scroll_wheel(&mut self, event: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
+
+    fn on_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let delta = event.delta.pixel_delta(px(20.0));
         let current_offset = self.scroll_handle.offset();
         let new_offset = current_offset + delta;
-        
+
         let viewport_height = self.get_viewport_height();
         self.set_scroll_offset_clamped(new_offset, viewport_height);
         cx.notify();
     }
-    
+
     /// Set scroll offset with bounds checking to prevent out-of-bounds scrolling
     /// Uses actual measured viewport height for accurate bounds
     fn set_scroll_offset_clamped(&mut self, offset: gpui::Point<Pixels>, viewport_height: Pixels) {
         // Calculate bounds for scrolling
         let total_height = self.item_height * self.visible_entries.len() as f32;
-        
+
         // Clamp scroll offset to valid range
         // Y: Can scroll from 0 (top) to -(total_height - viewport_height) (bottom)
         let max_scroll_y = px(0.0);
         let min_scroll_y = -(total_height - viewport_height).max(px(0.0));
-        
+
         // X: No horizontal scrolling needed, keep at 0
         let clamped_offset = gpui::point(
             px(0.0), // No horizontal scroll
-            offset.y.max(min_scroll_y).min(max_scroll_y)
+            offset.y.max(min_scroll_y).min(max_scroll_y),
         );
-        
+
         self.scroll_handle.set_offset(clamped_offset);
     }
-    
+
     /// Scroll to ensure a specific entry is visible
     pub fn scroll_to_entry(&mut self, entry_path: &Path, cx: &mut Context<Self>) {
         // Find the entry index in visible_entries
-        let entry_index = self.visible_entries.iter()
-            .position(|&idx| {
-                self.file_tree.get(idx)
-                    .map(|e| e.path == entry_path)
-                    .unwrap_or(false)
-            });
-        
+        let entry_index = self.visible_entries.iter().position(|&idx| {
+            self.file_tree
+                .get(idx)
+                .map(|e| e.path == entry_path)
+                .unwrap_or(false)
+        });
+
         if let Some(visible_idx) = entry_index {
             let viewport_height = self.get_viewport_height();
             let item_position = self.item_height * visible_idx as f32;
             let current_offset = self.scroll_handle.offset();
-            
+
             // Check if item is already visible
             let scroll_top = -current_offset.y;
             let scroll_bottom = scroll_top + viewport_height;
             let item_bottom = item_position + self.item_height;
-            
+
             if item_position < scroll_top {
                 // Item is above viewport, scroll to show it at top
-                self.set_scroll_offset_clamped(gpui::point(px(0.0), -item_position), viewport_height);
+                self.set_scroll_offset_clamped(
+                    gpui::point(px(0.0), -item_position),
+                    viewport_height,
+                );
                 cx.notify();
             } else if item_bottom > scroll_bottom {
                 // Item is below viewport, scroll to show it at bottom
                 let target_scroll = -(item_bottom - viewport_height);
-                self.set_scroll_offset_clamped(gpui::point(px(0.0), target_scroll), viewport_height);
+                self.set_scroll_offset_clamped(
+                    gpui::point(px(0.0), target_scroll),
+                    viewport_height,
+                );
                 cx.notify();
             }
         }
@@ -1115,7 +1181,7 @@ impl Render for FileExplorer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let file_tree_empty = self.file_tree.is_empty();
         let focus_handle = self.focus_handle.clone();
-        
+
         div()
             .key_context("FileExplorer")
             .track_focus(&focus_handle)
@@ -1151,7 +1217,7 @@ impl Render for FileExplorer {
                                     .font_medium()
                                     .tracking_wider()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(t!("CodeEditor.Explorer").to_string().to_uppercase())
+                                    .child(t!("CodeEditor.Explorer").to_string().to_uppercase()),
                             )
                             .child(
                                 h_flex()
@@ -1164,7 +1230,7 @@ impl Render for FileExplorer {
                                             .xsmall()
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.create_new_file(window, cx);
-                                            }))
+                                            })),
                                     )
                                     .child(
                                         Button::new("new_folder")
@@ -1174,7 +1240,7 @@ impl Render for FileExplorer {
                                             .xsmall()
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.create_new_folder(window, cx);
-                                            }))
+                                            })),
                                     )
                                     .child(
                                         Button::new("refresh")
@@ -1184,7 +1250,7 @@ impl Render for FileExplorer {
                                             .xsmall()
                                             .on_click(cx.listener(|this, _, _window, cx| {
                                                 this.refresh_file_tree(cx);
-                                            }))
+                                            })),
                                     )
                                     .child(
                                         Button::new("open_folder")
@@ -1197,10 +1263,10 @@ impl Render for FileExplorer {
                                                 if let Ok(cwd) = std::env::current_dir() {
                                                     this.open_project(cwd, window, cx);
                                                 }
-                                            }))
-                                    )
-                            )
-                    )
+                                            })),
+                                    ),
+                            ),
+                    ),
             )
             .child(
                 // Scrollable content area with virtualization
@@ -1210,16 +1276,22 @@ impl Render for FileExplorer {
                     .overflow_hidden()
                     .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
                     // Clicking anywhere else in the tree cancels an active rename
-                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, _, cx| {
-                        if this.renaming_path.is_some() {
-                            this.finish_rename_session(cx);
-                        }
-                    }))
-                    .on_mouse_down(gpui::MouseButton::Right, cx.listener(|this, _, _, cx| {
-                        if this.renaming_path.is_some() {
-                            this.finish_rename_session(cx);
-                        }
-                    }))
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            if this.renaming_path.is_some() {
+                                this.finish_rename_session(cx);
+                            }
+                        }),
+                    )
+                    .on_mouse_down(
+                        gpui::MouseButton::Right,
+                        cx.listener(|this, _, _, cx| {
+                            if this.renaming_path.is_some() {
+                                this.finish_rename_session(cx);
+                            }
+                        }),
+                    )
                     .when(file_tree_empty, |content| {
                         content.child(
                             v_flex()
@@ -1230,13 +1302,13 @@ impl Render for FileExplorer {
                                 .child(
                                     Icon::new(IconName::FolderOpen)
                                         .size_8()
-                                        .text_color(cx.theme().muted_foreground.opacity(0.6))
+                                        .text_color(cx.theme().muted_foreground.opacity(0.6)),
                                 )
                                 .child(
                                     div()
                                         .text_sm()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(t!("CodeEditor.ExplorerEmptyHint").to_string())
+                                        .child(t!("CodeEditor.ExplorerEmptyHint").to_string()),
                                 )
                                 .child(
                                     h_flex()
@@ -1251,26 +1323,29 @@ impl Render for FileExplorer {
                                         .child(
                                             Icon::new(IconName::FolderOpen)
                                                 .size_4()
-                                                .text_color(cx.theme().foreground)
+                                                .text_color(cx.theme().foreground),
                                         )
                                         .child(
                                             div()
                                                 .text_sm()
                                                 .text_color(cx.theme().foreground)
-                                                .child(t!("CodeEditor.OpenFolder").to_string())
+                                                .child(t!("CodeEditor.OpenFolder").to_string()),
                                         )
-                                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
-                                            if let Ok(cwd) = std::env::current_dir() {
-                                                this.open_project(cwd, window, cx);
-                                            }
-                                        }))
-                                )
+                                        .on_mouse_down(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(|this, _, window, cx| {
+                                                if let Ok(cwd) = std::env::current_dir() {
+                                                    this.open_project(cwd, window, cx);
+                                                }
+                                            }),
+                                        ),
+                                ),
                         )
                     })
                     .when(!file_tree_empty, |content| {
                         // Render virtualized content
                         content.child(self.render_file_tree_content(_window, cx))
-                    })
+                    }),
             )
             .when_some(self.project_root.clone(), |container, root| {
                 container.child(
@@ -1290,7 +1365,7 @@ impl Render for FileExplorer {
                                     Icon::new(IconName::FolderOpen)
                                         .size_3()
                                         .flex_none()
-                                        .text_color(cx.theme().muted_foreground)
+                                        .text_color(cx.theme().muted_foreground),
                                 )
                                 .child(
                                     div()
@@ -1303,10 +1378,10 @@ impl Render for FileExplorer {
                                             root.file_name()
                                                 .unwrap_or_default()
                                                 .to_string_lossy()
-                                                .to_string()
-                                        )
-                                )
-                        )
+                                                .to_string(),
+                                        ),
+                                ),
+                        ),
                 )
             })
     }

@@ -1873,6 +1873,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "editor_task_queue"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+]
+
+[[package]]
 name = "either"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1946,21 +1953,29 @@ dependencies = [
  "helio",
  "helio-asset-compat",
  "helio-default-graphs",
+ "helio-mats",
  "helio-pass-billboard",
  "helio-pass-decal",
  "helio-pass-forward-lit",
  "helio-pass-gbuffer",
+ "helio-pass-postprocess",
+ "helio-pass-sky",
+ "helio-pass-tsr",
+ "helio-pass-voxel-planet",
  "helio-pass-water-sim",
  "helio-voxel-data",
  "helio_component",
+ "image",
  "libloading 0.9.0",
  "lsp-types",
  "parking_lot",
  "profiling 0.1.0",
+ "psgc",
+ "pulsar_class",
  "pulsar_events",
  "pulsar_lsp",
  "pulsar_pie_abi",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0",
  "pulsar_scene",
  "pulsar_scene_model",
  "pulsar_scenedb",
@@ -2002,15 +2017,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dashmap",
+ "editor_task_queue",
  "image",
  "notify 8.2.0",
  "parking_lot",
  "plugin_editor_api",
  "plugin_manager",
  "profiling 0.1.0",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0",
  "serde",
  "serde_json",
+ "smol",
  "tokio",
  "tool_registry",
  "tool_registry_macros",
@@ -2042,6 +2059,7 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "tracing",
  "ui_types_common",
+ "uuid",
  "window_manager",
 ]
 
@@ -2631,6 +2649,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "gamma"
+version = "0.2.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Gamma?rev=b4ebf98486fb716d090d35b689a4eb8a0e414cc1#b4ebf98486fb716d090d35b689a4eb8a0e414cc1"
+dependencies = [
+ "gamma-core",
+ "gamma-derive",
+]
+
+[[package]]
+name = "gamma-core"
+version = "0.2.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Gamma?rev=b4ebf98486fb716d090d35b689a4eb8a0e414cc1#b4ebf98486fb716d090d35b689a4eb8a0e414cc1"
+dependencies = [
+ "rustc-hash 2.1.3",
+]
+
+[[package]]
+name = "gamma-derive"
+version = "0.2.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Gamma?rev=b4ebf98486fb716d090d35b689a4eb8a0e414cc1#b4ebf98486fb716d090d35b689a4eb8a0e414cc1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2735,12 +2780,6 @@ name = "glam"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
-
-[[package]]
-name = "glam"
-version = "0.29.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8babf46d4c1c9d92deac9f7be466f76dfc4482b6452fc5024b5e8daf6ffeb3ee"
 
 [[package]]
 name = "glam"
@@ -3090,6 +3129,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphy"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "rayon",
+ "rustc-hash 2.1.3",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "syn 2.0.119",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "grid"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3234,13 +3288,14 @@ dependencies = [
  "helio-pass-shadow-matrix",
  "helio-pass-sky",
  "helio-pass-tsr",
+ "helio-pass-volumetric-fog",
  "helio-xr",
  "image",
  "log",
  "meshopt",
  "openxr",
  "pollster 0.4.0",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "quark",
  "thiserror 2.0.20",
@@ -3282,7 +3337,9 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glam 0.33.8",
+ "log",
  "naga",
+ "notify 8.2.0",
  "profiling 0.1.0",
  "pulsar_scenedb",
  "thiserror 2.0.20",
@@ -3318,7 +3375,6 @@ dependencies = [
  "helio-pass-portal-cull",
  "helio-pass-portal-instances",
  "helio-pass-postprocess",
- "helio-pass-radiance-cascades",
  "helio-pass-shadow",
  "helio-pass-shadow-cull",
  "helio-pass-shadow-dirty",
@@ -3352,7 +3408,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3364,7 +3420,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3387,7 +3443,7 @@ dependencies = [
  "helio-core",
  "helio-mats",
  "log",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3402,7 +3458,7 @@ dependencies = [
  "helio-mats",
  "helio-pass-radiance-cascades",
  "helio-pass-shadow-matrix",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3423,6 +3479,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
+ "helio-pass-shadow-matrix",
  "wgpu",
 ]
 
@@ -3446,7 +3503,7 @@ dependencies = [
  "glam 0.33.8",
  "helio-core",
  "log",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3463,7 +3520,7 @@ dependencies = [
  "helio-pass-gbuffer",
  "helio-pass-light-cull",
  "log",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3490,7 +3547,7 @@ dependencies = [
  "helio-pass-radiance-cascades",
  "helio-pass-shadow-matrix",
  "log",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3560,6 +3617,7 @@ name = "helio-pass-occlusion-cull"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "helio-bake-types",
  "helio-core",
  "helio-pass-gbuffer",
  "helio-pass-indirect-dispatch",
@@ -3594,7 +3652,7 @@ dependencies = [
  "helio-core",
  "helio-pass-gbuffer",
  "log",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3620,7 +3678,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3695,7 +3753,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3759,9 +3817,22 @@ dependencies = [
  "helio-core",
  "helio-pass-postprocess",
  "helio-pass-shadow-matrix",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-voxel-planet"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam 0.33.8",
+ "helio-core",
+ "rustc-hash 2.1.3",
+ "serde",
+ "serde_json",
  "wgpu",
 ]
 
@@ -3772,15 +3843,39 @@ dependencies = [
  "bytemuck",
  "helio-core",
  "helio-pass-hiz",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
 ]
 
 [[package]]
+name = "helio-snapshot"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "futures-channel",
+ "glam 0.33.8",
+ "helio",
+ "helio-asset-compat",
+ "helio-default-graphs",
+ "helio-pass-forward-lit",
+ "helio-pass-gbuffer",
+ "image",
+ "log",
+ "pollster 0.4.0",
+ "pulsar_scenedb",
+ "thiserror 2.0.20",
+ "wgpu",
+]
+
+[[package]]
 name = "helio-voxel-data"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "helio-xr"
@@ -3813,10 +3908,14 @@ dependencies = [
  "helio-pass-foliage-place",
  "helio-pass-portal-cull",
  "helio-pass-postprocess",
+ "helio-pass-volumetric-fog",
+ "helio-pass-voxel-planet",
  "helio-pass-water-sim",
+ "helio-voxel-data",
  "plugin_editor_api",
  "pulsar_events",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0",
+ "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "pulsar_world_registry",
@@ -5067,6 +5166,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "mockaco-core"
+version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=46a5807da4d5d86b7334ccf7cc2577f022b7bc12#46a5807da4d5d86b7334ccf7cc2577f022b7bc12"
+
+[[package]]
+name = "mockaco-diff"
+version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=46a5807da4d5d86b7334ccf7cc2577f022b7bc12#46a5807da4d5d86b7334ccf7cc2577f022b7bc12"
+dependencies = [
+ "mockaco-core",
+ "similar 3.2.0",
+]
+
+[[package]]
+name = "mockaco-gpui"
+version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=46a5807da4d5d86b7334ccf7cc2577f022b7bc12#46a5807da4d5d86b7334ccf7cc2577f022b7bc12"
+dependencies = [
+ "mockaco-core",
+ "mockaco-diff",
+ "mockaco-renderer",
+]
+
+[[package]]
+name = "mockaco-renderer"
+version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=46a5807da4d5d86b7334ccf7cc2577f022b7bc12#46a5807da4d5d86b7334ccf7cc2577f022b7bc12"
+dependencies = [
+ "mockaco-core",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6303,7 +6434,10 @@ version = "0.1.0"
 dependencies = [
  "engine_subsystems",
  "gpui-ce",
- "pulsar_reflection",
+ "inventory",
+ "pulsar_events",
+ "pulsar_reflection 0.1.0",
+ "pulsar_script_vm",
  "schemars",
  "serde",
  "serde_json",
@@ -6319,10 +6453,13 @@ version = "0.1.0"
 dependencies = [
  "engine_subsystems",
  "gpui-ce",
+ "inventory",
  "libloading 0.9.0",
  "once_cell",
  "parking_lot",
  "plugin_editor_api",
+ "pulsar_events",
+ "pulsar_world_registry",
  "serde_json",
  "sha2 0.11.0",
  "tracing",
@@ -6544,6 +6681,8 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "crossbeam-queue",
+ "libc",
+ "memmap2",
  "once_cell",
  "parking_lot",
  "rusqlite",
@@ -6567,6 +6706,18 @@ checksum = "4488a4a36b9a4ba6b9334a32a39971f77c1436ec82c38707bce707699cc3bbcb"
 dependencies = [
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "psgc"
+version = "0.1.0"
+dependencies = [
+ "graphy",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "wgsl_std",
 ]
 
 [[package]]
@@ -6616,12 +6767,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulsar_class"
+version = "0.1.0"
+dependencies = [
+ "engine_class_derive",
+ "engine_fs",
+ "glam 0.33.8",
+ "inventory",
+ "pulsar_reflection 0.1.0",
+ "pulsar_scene_model",
+ "pulsar_scenedb",
+ "pulsar_world_registry",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "pulsar_events"
 version = "0.1.0"
 dependencies = [
- "engine_state",
+ "gamma",
+ "profiling 0.1.0",
  "serde",
+ "serde_json",
  "tracing",
+ "ui_types_common",
 ]
 
 [[package]]
@@ -6648,11 +6820,11 @@ name = "pulsar_reflection"
 version = "0.1.0"
 dependencies = [
  "dashmap",
- "glam 0.29.3",
+ "glam 0.33.8",
  "gpui-ce",
  "inventory",
  "once_cell",
- "pulsar_reflection_derive",
+ "pulsar_reflection_derive 0.1.0",
  "serde",
  "serde_json",
  "tracing",
@@ -6661,11 +6833,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulsar_reflection"
+version = "0.1.0"
+source = "git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae#2dab12bfb147d813e508e1db0b5220ba9ba167ae"
+dependencies = [
+ "dashmap",
+ "glam 0.33.8",
+ "inventory",
+ "once_cell",
+ "pulsar_reflection_derive 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "pulsar_reflection_codegen"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "pulsar_reflection_codegen"
+version = "0.1.0"
+source = "git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae#2dab12bfb147d813e508e1db0b5220ba9ba167ae"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "pulsar_reflection_derive"
 version = "0.1.0"
 dependencies = [
  "owo-colors",
  "proc-macro2",
+ "pulsar_reflection_codegen 0.1.0",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "pulsar_reflection_derive"
+version = "0.1.0"
+source = "git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae#2dab12bfb147d813e508e1db0b5220ba9ba167ae"
+dependencies = [
+ "owo-colors",
+ "proc-macro2",
+ "pulsar_reflection_codegen 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "quote",
  "syn 2.0.119",
 ]
@@ -6679,8 +6899,7 @@ dependencies = [
  "helio",
  "helio-asset-compat",
  "helio_component",
- "pulsar_events",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0",
  "serde",
  "serde_json",
  "tracing",
@@ -6690,7 +6909,9 @@ dependencies = [
 name = "pulsar_scene_model"
 version = "0.1.0"
 dependencies = [
- "pulsar_reflection",
+ "glam 0.33.8",
+ "inventory",
+ "pulsar_reflection 0.1.0",
  "pulsar_scenedb",
  "serde",
  "serde_json",
@@ -6705,7 +6926,7 @@ source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=214cb5319fcef099
 dependencies = [
  "ahash",
  "profiling 0.1.0",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb_derive",
  "serde",
  "serde_json",
@@ -6725,14 +6946,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulsar_script_math"
+version = "0.1.0"
+dependencies = [
+ "glam 0.33.8",
+ "pulsar_script_vm",
+ "serde_json",
+]
+
+[[package]]
 name = "pulsar_script_object_model"
 version = "0.1.0"
 dependencies = [
  "inventory",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0",
  "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_world_registry",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "pulsar_script_vm"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "inventory",
+ "libloading 0.9.0",
+ "pulsar_reflection 0.1.0",
+ "pulsar_scenedb",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -6751,10 +6996,15 @@ name = "pulsar_world_registry"
 version = "0.1.0"
 dependencies = [
  "inventory",
- "pulsar_reflection",
+ "pulsar_events",
+ "pulsar_reflection 0.1.0",
+ "pulsar_scene_model",
  "pulsar_scenedb",
+ "pulsar_script_math",
+ "pulsar_script_vm",
  "serde_json",
  "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]
@@ -7706,7 +7956,7 @@ name = "scenedb-inspector-agent"
 version = "0.1.0"
 dependencies = [
  "log",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
  "pulsar_scenedb",
  "serde_json",
  "shared_memory",
@@ -7770,6 +8020,9 @@ dependencies = [
  "futures",
  "gpui-ce",
  "log",
+ "mockaco-core",
+ "mockaco-diff",
+ "mockaco-gpui",
  "parking_lot",
  "plugin_editor_api",
  "rust-i18n",
@@ -7778,13 +8031,14 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "similar",
+ "similar 2.7.0",
  "tracing",
  "tracing-subscriber",
  "ui",
  "ui_common",
  "ui_types_common",
  "uuid",
+ "wgpui-base",
 ]
 
 [[package]]
@@ -8136,6 +8390,15 @@ name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+]
 
 [[package]]
 name = "simplecss"
@@ -9829,12 +10092,13 @@ dependencies = [
  "engine_fs",
  "engine_state",
  "gpui-ce",
+ "helio-snapshot",
  "image",
  "open",
  "parking_lot",
  "plugin_editor_api",
  "pulsar_auth",
- "pulsar_reflection",
+ "pulsar_reflection 0.1.0",
  "reqwest",
  "rust-i18n",
  "rust-i18n-macro",
@@ -10592,6 +10856,16 @@ dependencies = [
  "unicode-segmentation",
  "web-time",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "wgsl_std"
+version = "0.1.0"
+dependencies = [
+ "graphy",
+ "linkme",
+ "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -11752,19 +12026,3 @@ dependencies = [
  "syn 3.0.6",
  "winnow 1.0.4",
 ]
-
-[[patch.unused]]
-name = "pbgc"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "psgc"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "wgsl_std"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "graphy"
-version = "0.1.0"

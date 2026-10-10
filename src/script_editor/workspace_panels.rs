@@ -1,11 +1,16 @@
 //! Workspace panels for Script Editor
 
-use rust_i18n::t;
-use gpui::*;
-use ui::{ActiveTheme, StyledExt, dock::{Panel, PanelEvent}, v_flex, input::InputState};
-use std::path::PathBuf;
-use super::text_editor::TextEditor;
 use super::file_explorer::FileExplorer;
+use super::text_editor::TextEditor;
+use gpui::*;
+use rust_i18n::t;
+use std::path::PathBuf;
+use ui::{
+    ActiveTheme, StyledExt,
+    dock::{Panel, PanelEvent},
+    input::InputState,
+    v_flex,
+};
 
 /// Individual File Panel - wraps a single file's editor
 pub struct FilePanelWrapper {
@@ -38,22 +43,22 @@ impl EventEmitter<PanelEvent> for FilePanelWrapper {}
 
 impl Render for FilePanelWrapper {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .child(
-                ui::input::TextInput::new(&self.input_state)
-                    .h_full()
-                    .w_full()
-                    .font_family("JetBrains Mono")
-                    .font(gpui::Font {
-                        family: "JetBrains Mono".to_string().into(),
-                        weight: gpui::FontWeight::NORMAL,
-                        style: gpui::FontStyle::Normal,
-                        features: gpui::FontFeatures::default(),
-                        fallbacks: Some(gpui::FontFallbacks::from_fonts(vec!["monospace".to_string()])),
-                    })
-                    .text_size(px(14.0))
-            )
+        div().size_full().child(
+            ui::input::TextInput::new(&self.input_state)
+                .h_full()
+                .w_full()
+                .font_family("JetBrains Mono")
+                .font(gpui::Font {
+                    family: "JetBrains Mono".to_string().into(),
+                    weight: gpui::FontWeight::NORMAL,
+                    style: gpui::FontStyle::Normal,
+                    features: gpui::FontFeatures::default(),
+                    fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
+                        "monospace".to_string(),
+                    ])),
+                })
+                .text_size(px(14.0)),
+        )
     }
 }
 
@@ -69,7 +74,9 @@ impl Panel for FilePanelWrapper {
     }
 
     fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
-        let filename = self.file_path.file_name()
+        let filename = self
+            .file_path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("untitled")
             .to_string();
@@ -104,13 +111,13 @@ impl Render for WelcomePanelWrapper {
                     .text_xl()
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(cx.theme().foreground)
-                    .child(t!("CodeEditor.Welcome").to_string())
+                    .child(t!("CodeEditor.Welcome").to_string()),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(t!("CodeEditor.OpenFileHint").to_string())
+                    .child(t!("CodeEditor.OpenFileHint").to_string()),
             )
     }
 }
