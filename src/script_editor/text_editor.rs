@@ -518,7 +518,7 @@ impl TextEditor {
 
         let theme = surface_theme(cx.theme());
         if file.surface.theme() != theme {
-            file.surface.set_theme(theme);
+            file.surface.set_theme(theme.clone());
         }
         let frame = file.surface.render_frame();
         let surface_theme = frame.theme;
@@ -666,6 +666,8 @@ fn surface_theme(theme: &ui::Theme) -> mockaco_gpui::SurfaceTheme {
         primary_selection: surface_color_from_hsla(theme.selection),
         caret: surface_color_from_hsla(theme.caret),
         decoration: surface_color_from_hsla(theme.warning),
+        active_line: surface_color_from_hsla(theme.list_active),
+        ..mockaco_gpui::SurfaceTheme::default()
     }
 }
 
