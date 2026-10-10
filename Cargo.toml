@@ -26,11 +26,11 @@ wgpui-base = { path = "../../../crates/ui/wgpui-base" }
 ui_common       = { path = "../../../crates/editor/ui_common" }
 ui_types_common = { path = "../../../crates/editor/ui_types_common" }
 
-# Keep Mockaco on the tree-sitter 0.24-compatible surface revision used by
-# WGPUI. The host adapter bridges clipboard/history/navigation on this API.
-mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "46a5807da4d5d86b7334ccf7cc2577f022b7bc12" }
-mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "46a5807da4d5d86b7334ccf7cc2577f022b7bc12" }
-mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "46a5807da4d5d86b7334ccf7cc2577f022b7bc12" }
+# Keep Mockaco and WGPUI on the same tree-sitter 0.25-compatible API.
+# The host adapter bridges clipboard/history/navigation on this API.
+mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "3395ddb0e6f1114cd76d6f33b4947877f9e18a92" }
+mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "3395ddb0e6f1114cd76d6f33b4947877f9e18a92" }
+mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "3395ddb0e6f1114cd76d6f33b4947877f9e18a92" }
 
 # Engine dependencies
 engine_state  = { path = "../../../crates/core/engine_state" }
