@@ -1,20 +1,42 @@
-//! GPUI host view for Mockaco's framework-independent editor surface.
+//! Pulsar host for Mockaco.
+//!
+//! Mockaco owns everything about the editing surface: text layout, syntax
+//! highlighting, folding, caret/selection, scrolling, scrollbars, minimap and
+//! input. This module only does what is specific to Pulsar: file tabs, file
+//! I/O, bridging the UI theme into Mockaco's theme, and forwarding document
+//! events to the rest of the plugin.
 
 use gpui::*;
-use mockaco_core::{Grouping, Selection, SelectionSet, Transaction};
 use mockaco_diff::DiffRowKind;
-use mockaco_gpui::{
-    DiffSplitSurface, EditorSurface, InputEvent as MockacoInputEvent, InputRouter, Key, KeyEvent,
-    KeyModifiers, SurfaceColor, SurfaceGeometry,
-};
-use std::collections::HashSet;
+use mockaco_gpui::native::{EditorEvent, WgpuiEditorView};
+use mockaco_gpui::{DiffSplitSurface, EditorSurface, Language, SurfaceColor, SurfaceGeometry, SurfaceTheme};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use ui::{
     button::{Button, ButtonVariants as _},
-    h_flex, v_flex, ActiveTheme as _, PixelsExt as _, Sizable as _, StyledExt,
+    context_menu::ContextMenuExt as _,
+    h_flex, v_flex, ActiveTheme as _, Sizable as _,
 };
-use wgpui_base::ElementExt as _;
+
+actions!(
+    mockaco_editor,
+    [
+        EditorUndo,
+        EditorRedo,
+        EditorCut,
+        EditorCopy,
+        EditorPaste,
+        EditorSelectAll,
+        EditorUnfoldAll,
+        EditorSave,
+        EditorCopyPath,
+    ]
+);
+
+const FONT_FAMILY: &str = "JetBrains Mono";
+const FONT_SIZE: f32 = 14.0;
+const LINE_HEIGHT: f32 = 20.0;
 
 #[derive(Clone)]
 pub enum TextEditorEvent {
@@ -46,37 +68,18 @@ pub enum TextEditorEvent {
 
 pub struct OpenFile {
     pub path: PathBuf,
-    pub surface: EditorSurface,
+    pub view: Entity<WgpuiEditorView>,
     pub is_modified: bool,
     pub version: i32,
-    diff_lines: HashSet<usize>,
-    diff_removed: bool,
-    undo_history: Vec<String>,
-    redo_history: Vec<String>,
-}
-
-impl OpenFile {
-    fn new(path: PathBuf, content: String) -> Self {
-        let mut surface =
-            EditorSurface::new(content, Default::default(), SurfaceGeometry::default());
-        Self {
-            path,
-            surface,
-            is_modified: false,
-            version: 1,
-            diff_lines: HashSet::new(),
-            diff_removed: false,
-            undo_history: Vec::new(),
-            redo_history: Vec::new(),
-        }
-    }
+    _subscription: Subscription,
 }
 
 pub struct TextEditor {
     focus_handle: FocusHandle,
     open_files: Vec<OpenFile>,
     current_file_index: Option<usize>,
-    input_router: InputRouter,
+    applied_theme: Option<SurfaceTheme>,
+    generating: bool,
 }
 
 impl TextEditor {
@@ -97,7 +100,8 @@ impl TextEditor {
             focus_handle: cx.focus_handle(),
             open_files: Vec::new(),
             current_file_index: None,
-            input_router: InputRouter::default(),
+            applied_theme: None,
+            generating: false,
         }
     }
 
@@ -109,9 +113,79 @@ impl TextEditor {
         // The ScriptEditor event bridge forwards Mockaco document changes.
     }
 
-    pub fn open_file(&mut self, path: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
+    fn create_view(
+        &mut self,
+        path: &PathBuf,
+        content: String,
+        cx: &mut Context<Self>,
+    ) -> Entity<WgpuiEditorView> {
+        let theme = surface_theme(cx.theme());
+        let surface = EditorSurface::with_language(
+            content,
+            Default::default(),
+            SurfaceGeometry::default(),
+            Language::from_path(path),
+        );
+        let view = cx.new(|cx| {
+            let mut view = WgpuiEditorView::new(surface, cx);
+            view.set_font(FONT_FAMILY, FONT_SIZE, LINE_HEIGHT);
+            view
+        });
+        view.update(cx, |view, cx| view.set_theme(theme, cx));
+        view
+    }
+
+    fn push_file(&mut self, path: PathBuf, view: Entity<WgpuiEditorView>, cx: &mut Context<Self>) {
+        let event_path = path.clone();
+        let subscription = cx.subscribe(
+            &view,
+            move |this: &mut Self, view: Entity<WgpuiEditorView>, event: &EditorEvent, cx| {
+                this.on_editor_event(&event_path, &view, event, cx);
+            },
+        );
+        self.open_files.push(OpenFile {
+            path,
+            view,
+            is_modified: false,
+            version: 1,
+            _subscription: subscription,
+        });
+        self.current_file_index = Some(self.open_files.len() - 1);
+    }
+
+    fn on_editor_event(
+        &mut self,
+        path: &PathBuf,
+        view: &Entity<WgpuiEditorView>,
+        event: &EditorEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.open_files.iter().position(|file| &file.path == path) else {
+            return;
+        };
+        match event {
+            EditorEvent::Changed => {
+                let content = view.read(cx).text();
+                let file = &mut self.open_files[index];
+                file.is_modified = true;
+                file.version = file.version.saturating_add(1);
+                cx.emit(TextEditorEvent::FileChanged {
+                    path: path.clone(),
+                    content,
+                    version: self.open_files[index].version,
+                });
+                cx.notify();
+            }
+            EditorEvent::SaveRequested => {
+                self.save_file_at(index, cx);
+            }
+        }
+    }
+
+    pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.open_files.iter().position(|file| file.path == path) {
             self.current_file_index = Some(index);
+            self.focus_current(window, cx);
             cx.notify();
             return;
         }
@@ -123,9 +197,9 @@ impl TextEditor {
                 String::new()
             }
         };
-        self.open_files
-            .push(OpenFile::new(path.clone(), content.clone()));
-        self.current_file_index = Some(self.open_files.len() - 1);
+        let view = self.create_view(&path, content.clone(), cx);
+        self.push_file(path.clone(), view, cx);
+        self.focus_current(window, cx);
         cx.emit(TextEditorEvent::FileOpened { path, content });
         cx.notify();
     }
@@ -149,7 +223,7 @@ impl TextEditor {
                 let mut diff = DiffSplitSurface::new(&original.snapshot(), modified);
                 let diff_row_count = diff.diff().rows().len().max(1);
                 diff.set_viewport(diff_row_count);
-                let lines = diff
+                let lines: HashSet<usize> = diff
                     .diff()
                     .rows()
                     .iter()
@@ -166,31 +240,40 @@ impl TextEditor {
             }
             None => (HashSet::new(), false),
         };
+
+        let tint = {
+            let theme = cx.theme();
+            let base = if diff_removed { theme.danger } else { theme.success };
+            with_alpha(surface_color_from_hsla(base), 115)
+        };
+        let backgrounds: HashMap<usize, SurfaceColor> =
+            diff_lines.into_iter().map(|line| (line, tint)).collect();
+
         if let Some(index) = self.open_files.iter().position(|file| file.path == path) {
-            let mut file = OpenFile::new(path, content);
-            file.diff_lines = diff_lines;
-            file.diff_removed = diff_removed;
-            self.open_files[index] = file;
+            let file = &mut self.open_files[index];
+            file.is_modified = false;
+            file.view.update(cx, |view, cx| {
+                view.replace_text(content, cx);
+                view.set_line_backgrounds(backgrounds, cx);
+            });
             self.current_file_index = Some(index);
         } else {
-            let mut file = OpenFile::new(path, content);
-            file.diff_lines = diff_lines;
-            file.diff_removed = diff_removed;
-            self.open_files.push(file);
-            self.current_file_index = Some(self.open_files.len() - 1);
+            let view = self.create_view(&path, content, cx);
+            view.update(cx, |view, cx| view.set_line_backgrounds(backgrounds, cx));
+            self.push_file(path, view, cx);
         }
         cx.notify();
     }
 
-    pub fn save_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(file) = self.current_file_mut() else {
+    fn save_file_at(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+        let Some(file) = self.open_files.get(index) else {
             return false;
         };
         let path = file.path.clone();
-        let content = file.surface.document().text().to_owned();
+        let content = file.view.read(cx).text();
         match fs::write(&path, &content) {
             Ok(()) => {
-                file.is_modified = false;
+                self.open_files[index].is_modified = false;
                 cx.emit(TextEditorEvent::FileSaved { path, content });
                 cx.notify();
                 true
@@ -202,7 +285,14 @@ impl TextEditor {
         }
     }
 
-    pub fn close_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn save_current_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
+        match self.current_file_index {
+            Some(index) => self.save_file_at(index, cx),
+            None => false,
+        }
+    }
+
+    pub fn close_current_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.current_file_index else {
             return;
         };
@@ -216,9 +306,11 @@ impl TextEditor {
         } else {
             Some(index.min(self.open_files.len() - 1))
         };
+        self.focus_current(window, cx);
         cx.notify();
     }
 
+    /// Moves the caret to a 1-based line/column and centers it.
     pub fn go_to_line(
         &mut self,
         line: usize,
@@ -226,40 +318,29 @@ impl TextEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(file) = self.current_file_mut() {
-            let map = file.surface.document().position_map();
-            let line_index = line.saturating_sub(1);
-            if let (Ok(start), Ok(end)) = (map.line_start(line_index), map.line_end(line_index)) {
-                let caret = start.saturating_add(column.saturating_sub(1)).min(end);
-                file.surface
-                    .editor_mut()
-                    .set_selections(SelectionSet::new([Selection::caret(caret)]));
-                file.surface.scroll_to(line_index.saturating_sub(1), 0);
-            }
+        if let Some(file) = self.current_file() {
+            file.view.update(cx, |view, cx| {
+                view.go_to(line.saturating_sub(1), column.saturating_sub(1), cx)
+            });
         }
-        cx.notify();
     }
 
     pub fn current_file_path(&self) -> Option<PathBuf> {
         self.current_file().map(|file| file.path.clone())
     }
 
-    pub fn get_current_scroll_offset(&self, _cx: &mut Context<Self>) -> Option<Point<Pixels>> {
+    pub fn get_current_scroll_offset(&self, cx: &mut Context<Self>) -> Option<Point<Pixels>> {
         let file = self.current_file()?;
-        let scroll = file.surface.scroll();
-        Some(point(
-            px(scroll.horizontal_columns as f32 * 8.0),
-            px(scroll.top_row as f32 * 20.0),
-        ))
+        let (x, y) = file.view.read(cx).scroll_offset();
+        Some(point(px(x), px(y)))
     }
 
     pub fn set_scroll_offset(&mut self, offset: Point<Pixels>, cx: &mut Context<Self>) {
-        if let Some(file) = self.current_file_mut() {
-            let row = (offset.y.as_f32() / 20.0).max(0.0) as usize;
-            let column = (offset.x.as_f32() / 8.0).max(0.0) as usize;
-            file.surface.scroll_to(row, column);
+        if let Some(file) = self.current_file() {
+            file.view.update(cx, |view, cx| {
+                view.set_scroll_offset(offset.x.to_f32(), offset.y.to_f32(), cx)
+            });
         }
-        cx.notify();
     }
 
     fn current_file(&self) -> Option<&OpenFile> {
@@ -267,408 +348,160 @@ impl TextEditor {
             .and_then(|index| self.open_files.get(index))
     }
 
-    fn current_file_mut(&mut self) -> Option<&mut OpenFile> {
-        self.current_file_index
-            .and_then(|index| self.open_files.get_mut(index))
+    fn focus_current(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(file) = self.current_file() {
+            let handle = file.view.focus_handle(cx);
+            window.focus(&handle, cx);
+        }
     }
 
-    fn route_input(&mut self, event: MockacoInputEvent, cx: &mut Context<Self>) {
-        let mut changed = None;
-        if let Some(index) = self.current_file_index {
-            let (input_router, open_files) = (&mut self.input_router, &mut self.open_files);
-            if let Some(file) = open_files.get_mut(index) {
-                let before = file.surface.document().text().to_owned();
-                if let Ok(outcome) = input_router.route(&mut file.surface, event) {
-                    if outcome.document_changed {
-                        file.undo_history.push(before);
-                        file.redo_history.clear();
-                        file.is_modified = true;
-                        file.version = file.version.saturating_add(1);
-                        changed = Some((
-                            file.path.clone(),
-                            file.surface.document().text().to_owned(),
-                            file.version,
-                        ));
-                    }
-                }
-            }
-        }
-        if let Some((path, content, version)) = changed {
-            cx.emit(TextEditorEvent::FileChanged {
-                path,
-                content,
-                version,
-            });
-        }
-        cx.notify();
-    }
-
-    fn restore_history(&mut self, redo: bool, cx: &mut Context<Self>) {
-        let mut changed = None;
-        if let Some(file) = self.current_file_mut() {
-            let target = if redo {
-                file.redo_history.pop()
-            } else {
-                file.undo_history.pop()
-            };
-            if let Some(target) = target {
-                let current = file.surface.document().text().to_owned();
-                if redo {
-                    file.undo_history.push(current.clone());
-                } else {
-                    file.redo_history.push(current.clone());
-                }
-                let transaction = Transaction::new().replace(0..current.len(), target.clone());
-                if file
-                    .surface
-                    .apply_transaction(&transaction, Grouping::Separate)
-                    .is_ok()
-                {
-                    let end = target.len();
-                    file.surface
-                        .editor_mut()
-                        .set_selections(SelectionSet::caret(end));
-                    file.is_modified = true;
-                    file.version = file.version.saturating_add(1);
-                    changed = Some((file.path.clone(), target, file.version));
-                }
-            }
-        }
-        if let Some((path, content, version)) = changed {
-            cx.emit(TextEditorEvent::FileChanged {
-                path,
-                content,
-                version,
-            });
-        }
-        cx.notify();
-    }
-
-    fn move_vertical(&mut self, direction: isize, extend: bool, cx: &mut Context<Self>) {
-        if let Some(file) = self.current_file_mut() {
-            let snapshot = file.surface.document();
-            let text = snapshot.text();
-            let map = snapshot.position_map();
-            let selections = file.surface.editor().selections().selections();
-            let moved = selections
-                .iter()
-                .map(|selection| {
-                    let head = selection.head.min(text.len());
-                    let position = map.byte_to_line_column(head).ok()?;
-                    let line = (position.line as isize + direction)
-                        .clamp(0, map.line_count().saturating_sub(1) as isize)
-                        as usize;
-                    let start = map.line_start(line).ok()?;
-                    let end = map.line_end(line).ok()?;
-                    let mut caret = (start + position.column).min(end);
-                    while caret > start && !text.is_char_boundary(caret) {
-                        caret -= 1;
-                    }
-                    Some(if extend {
-                        Selection::range(selection.anchor, caret)
-                    } else {
-                        Selection::caret(caret)
-                    })
-                })
-                .collect::<Option<Vec<_>>>();
-            if let Some(moved) = moved {
-                file.surface
-                    .editor_mut()
-                    .set_selections(SelectionSet::new(moved));
-            }
-        }
-        cx.notify();
-    }
-
-    fn selected_text(&self) -> Option<String> {
-        let file = self.current_file()?;
-        let text = file.surface.document().text();
-        let selections = file.surface.editor().selections().selections();
-        Some(
-            selections
-                .iter()
-                .filter_map(|selection| {
-                    let range = selection.ordered_range();
-                    (!range.is_empty()).then(|| text.get(range).unwrap_or_default())
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    }
-
-    fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let modifiers = KeyModifiers {
-            shift: keystroke.modifiers.shift,
-            control: keystroke.modifiers.control,
-            alt: keystroke.modifiers.alt,
-            command: keystroke.modifiers.platform,
-        };
-        if modifiers.control || modifiers.command {
-            if let Some(key) = keystroke.key_char.as_deref() {
-                if key.eq_ignore_ascii_case("s") {
-                    self.save_current_file(_window, cx);
-                    return;
-                }
-                if key.eq_ignore_ascii_case("z") || key.eq_ignore_ascii_case("y") {
-                    let redo = key.eq_ignore_ascii_case("y")
-                        || (key.eq_ignore_ascii_case("z") && modifiers.shift);
-                    self.restore_history(redo, cx);
-                    return;
-                }
-                if key.eq_ignore_ascii_case("c") {
-                    if let Some(text) = self.selected_text() {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    }
-                    return;
-                }
-                if key.eq_ignore_ascii_case("x") {
-                    if let Some(text) = self.selected_text().filter(|text| !text.is_empty()) {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                        self.route_input(
-                            MockacoInputEvent::Key(KeyEvent {
-                                key: Key::Delete,
-                                modifiers: KeyModifiers::default(),
-                            }),
-                            cx,
-                        );
-                    }
-                    return;
-                }
-                if key.eq_ignore_ascii_case("v") {
-                    if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                        self.route_input(MockacoInputEvent::Text(text), cx);
-                    }
-                    return;
-                }
-            }
-        }
-
-        let key = match keystroke.key.as_str() {
-            "backspace" => Key::Backspace,
-            "delete" => Key::Delete,
-            "enter" => Key::Enter,
-            "tab" => Key::Tab,
-            "escape" => Key::Escape,
-            "left" => Key::Left,
-            "right" => Key::Right,
-            "home" => Key::Home,
-            "end" => Key::End,
-            "up" => {
-                self.move_vertical(-1, modifiers.shift, cx);
-                return;
-            }
-            "down" => {
-                self.move_vertical(1, modifiers.shift, cx);
-                return;
-            }
-            "pageup" => {
-                self.move_vertical(-32, modifiers.shift, cx);
-                return;
-            }
-            "pagedown" => {
-                self.move_vertical(32, modifiers.shift, cx);
-                return;
-            }
-            _ => {
-                if !modifiers.control && !modifiers.command && !modifiers.alt {
-                    if let Some(text) = keystroke.key_char.clone() {
-                        self.route_input(MockacoInputEvent::Text(text), cx);
-                        return;
-                    }
-                }
-                Key::Unsupported(keystroke.key.clone())
-            }
-        };
-        self.route_input(MockacoInputEvent::Key(KeyEvent { key, modifiers }), cx);
-    }
-
-    fn on_scroll(
+    fn with_view(
         &mut self,
-        event: &ScrollWheelEvent,
-        _window: &mut Window,
         cx: &mut Context<Self>,
+        f: impl FnOnce(&mut WgpuiEditorView, &mut Context<WgpuiEditorView>),
     ) {
-        let (vertical, horizontal) = match event.delta {
-            ScrollDelta::Lines(delta) => (-(delta.y.round() as isize), delta.x.round() as isize),
-            ScrollDelta::Pixels(delta) => (
-                (delta.y.as_f32() / 20.0).round() as isize,
-                (delta.x.as_f32() / 8.0).round() as isize,
-            ),
-        };
-        self.route_input(
-            MockacoInputEvent::Scroll {
-                vertical,
-                horizontal,
-            },
-            cx,
-        );
+        if let Some(file) = self.current_file() {
+            file.view.update(cx, f);
+        }
     }
 
-    fn render_editor(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(file) = self.current_file_mut() else {
-            return v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .text_color(cx.theme().muted_foreground)
-                .child("Open a source file to begin editing")
-                .into_any_element();
-        };
-
-        let theme = surface_theme(cx.theme());
-        if file.surface.theme() != theme {
-            file.surface.set_theme(theme.clone());
+    /// Writes a ~1,000,000-line Rust file to the temp directory on a
+    /// background thread and opens it, to stress-test the editor.
+    pub fn generate_stress_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.generating {
+            return;
         }
-        let frame = file.surface.render_frame();
-        let surface_theme = frame.theme;
-        let mut rows = v_flex().size_full().overflow_hidden();
-        for row in frame.rows {
-            let gutter = frame
-                .gutter
-                .rows
-                .iter()
-                .find(|gutter| gutter.display_row == row.display_row);
-            let line_number = gutter.map(|gutter| gutter.line_number).unwrap_or(0);
-            let is_active = frame
-                .carets
-                .iter()
-                .any(|caret| caret.display_row == row.display_row && caret.primary);
-            let row_background = if file.diff_lines.contains(&row.buffer_line) {
-                if file.diff_removed {
-                    with_alpha(surface_color_from_hsla(cx.theme().danger), 115)
-                } else {
-                    with_alpha(surface_color_from_hsla(cx.theme().success), 115)
-                }
-            } else if is_active {
-                with_alpha(surface_color_from_hsla(cx.theme().list_active), 150)
-            } else {
-                surface_theme.background
-            };
-            let mut code = div()
-                .relative()
-                .flex_1()
-                .h(px(row.height))
-                .pl(px(12.0))
-                .font_family("JetBrains Mono")
-                .text_color(surface_color(surface_theme.foreground))
-                .bg(surface_color(row_background))
-                .whitespace_nowrap();
-            for selection in frame
-                .selections
-                .iter()
-                .filter(|selection| selection.display_row == row.display_row)
-            {
-                code = code.child(
-                    div()
-                        .absolute()
-                        .left(px(selection.x + 12.0))
-                        .top(px(selection.y - row.y))
-                        .w(px(selection.width.max(1.0)))
-                        .h(px(selection.height))
-                        .bg(surface_color(if selection.primary {
-                            surface_theme.primary_selection
-                        } else {
-                            surface_theme.selection
-                        })),
-                );
-            }
-            code = code.child(row.text.clone());
-            for caret in frame
-                .carets
-                .iter()
-                .filter(|caret| caret.display_row == row.display_row)
-            {
-                code = code.child(
-                    div()
-                        .absolute()
-                        .left(px(caret.x + 12.0))
-                        .top(px(caret.y - row.y))
-                        .w(px(if caret.primary { 2.0 } else { 1.0 }))
-                        .h(px(caret.height))
-                        .bg(surface_color(surface_theme.caret)),
-                );
-            }
-            rows = rows.child(
-                h_flex()
-                    .h(px(row.height))
-                    .w_full()
-                    .child(
-                        div()
-                            .w(px(frame.gutter.line_number_width as f32 * 8.0 + 24.0))
-                            .pr_2()
-                            .text_right()
-                            .font_family("JetBrains Mono")
-                            .text_color(surface_color(surface_theme.gutter_foreground))
-                            .bg(surface_color(surface_theme.gutter_background))
-                            .child(line_number.to_string()),
-                    )
-                    .child(code),
-            );
-        }
-
-        let editor_entity = cx.entity();
-        div()
-            .size_full()
-            .overflow_hidden()
-            .font_family("JetBrains Mono")
-            .text_size(px(14.0))
-            .line_height(px(20.0))
-            .bg(surface_color(theme.background))
-            .track_focus(&self.focus_handle)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    window.focus(&this.focus_handle, cx);
-                }),
-            )
-            .on_key_down(cx.listener(Self::on_key_down))
-            .on_scroll_wheel(cx.listener(Self::on_scroll))
-            .child(rows)
-            .on_prepaint(move |bounds, _, cx| {
-                let width = bounds.size.width.as_f32().max(1.0);
-                let height = bounds.size.height.as_f32().max(1.0);
-                editor_entity.update(cx, |editor, cx| {
-                    let Some(file) = editor.current_file_mut() else {
-                        return;
-                    };
-
-                    let mut geometry = file.surface.geometry();
-                    geometry.width = width;
-                    geometry.height = height;
-                    if file.surface.geometry() != geometry {
-                        file.surface.set_geometry(geometry);
+        self.generating = true;
+        cx.notify();
+        let task = cx.background_spawn(async move {
+            let path = std::env::temp_dir().join("pulsar_mockaco_1m_lines.rs");
+            let result = write_stress_file(&path, 1_000_000).map(|_| path);
+            result
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.generating = false;
+                match result {
+                    Ok(path) => this.open_file(path, window, cx),
+                    Err(error) => {
+                        tracing::error!("Could not generate stress file: {}", error);
                         cx.notify();
                     }
-                });
-            })
-            .into_any_element()
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Pushes the active UI theme into every open editor when it changes.
+    fn apply_theme(&mut self, cx: &mut Context<Self>) {
+        let theme = surface_theme(cx.theme());
+        if self.applied_theme.as_ref() == Some(&theme) {
+            return;
+        }
+        for file in &self.open_files {
+            file.view
+                .update(cx, |view, cx| view.set_theme(theme.clone(), cx));
+        }
+        self.applied_theme = Some(theme);
     }
 }
 
-fn surface_color(color: SurfaceColor) -> Hsla {
-    Rgba {
-        r: f32::from(color.red) / 255.0,
-        g: f32::from(color.green) / 255.0,
-        b: f32::from(color.blue) / 255.0,
-        a: f32::from(color.alpha) / 255.0,
-    }
-    .into()
-}
+/// Generates varied, realistic Rust (structs, impls, enums, traits, tests,
+/// comments, strings, numbers) so highlighting and folding have real work.
+fn write_stress_file(path: &std::path::Path, target_lines: usize) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
+    let mut lines = 0usize;
+    let mut module = 0usize;
+    writeln!(out, "//! Generated stress file: {target_lines} lines.\n")?;
+    lines += 2;
+    while lines < target_lines {
+        let m = module;
+        module += 1;
+        let chunk = format!(
+            r#"/// Module {m} documentation.
+pub mod module_{m} {{
+    use std::collections::HashMap;
 
-fn surface_theme(theme: &ui::Theme) -> mockaco_gpui::SurfaceTheme {
-    mockaco_gpui::SurfaceTheme {
-        background: surface_color_from_hsla(theme.background),
-        gutter_background: surface_color_from_hsla(theme.muted),
-        foreground: surface_color_from_hsla(theme.foreground),
-        gutter_foreground: surface_color_from_hsla(theme.muted_foreground),
-        selection: surface_color_from_hsla(theme.selection),
-        primary_selection: surface_color_from_hsla(theme.selection),
-        caret: surface_color_from_hsla(theme.caret),
-        decoration: surface_color_from_hsla(theme.warning),
-        active_line: surface_color_from_hsla(theme.list_active),
-        ..mockaco_gpui::SurfaceTheme::default()
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Item{m} {{
+        pub id: u64,
+        pub name: String,
+        pub weight: f32,
+        pub tags: Vec<&'static str>,
+    }}
+
+    #[derive(Debug, Clone, Copy)]
+    pub enum Kind{m} {{
+        Small,
+        Large {{ factor: u32 }},
+        Custom(i64),
+    }}
+
+    pub trait Describe{m} {{
+        fn describe(&self) -> String;
+    }}
+
+    impl Describe{m} for Item{m} {{
+        fn describe(&self) -> String {{
+            // Build a human readable description.
+            format!("item {{}} ({{}}) weighs {{:.2}}", self.id, self.name, self.weight)
+        }}
+    }}
+
+    impl Item{m} {{
+        pub fn new(id: u64, name: &str) -> Self {{
+            Self {{
+                id,
+                name: name.to_string(),
+                weight: {m} as f32 * 0.5 + 1.25,
+                tags: vec!["generated", "stress"],
+            }}
+        }}
+
+        pub fn classify(&self) -> Kind{m} {{
+            match self.id % 3 {{
+                0 => Kind{m}::Small,
+                1 => Kind{m}::Large {{ factor: {m} }},
+                _ => Kind{m}::Custom(-(self.id as i64)),
+            }}
+        }}
+
+        /* Sum weights across a lookup table. */
+        pub fn total(table: &HashMap<u64, Item{m}>) -> f32 {{
+            let mut sum = 0.0;
+            for (key, item) in table {{
+                if *key % 2 == 0 {{
+                    sum += item.weight;
+                }} else {{
+                    sum -= 0.5;
+                }}
+            }}
+            sum
+        }}
+    }}
+
+    #[cfg(test)]
+    mod tests {{
+        use super::*;
+
+        #[test]
+        fn builds_item() {{
+            let item = Item{m}::new({m}, "sample");
+            assert_eq!(item.id, {m});
+            assert!(item.describe().contains("sample"));
+        }}
+    }}
+}}
+
+"#
+        );
+        out.write_all(chunk.as_bytes())?;
+        lines += chunk.bytes().filter(|b| *b == b'\n').count();
     }
+    out.flush()
 }
 
 fn surface_color_from_hsla(color: Hsla) -> SurfaceColor {
@@ -685,16 +518,117 @@ fn with_alpha(color: SurfaceColor, alpha: u8) -> SurfaceColor {
     SurfaceColor { alpha, ..color }
 }
 
+/// Mockaco token kinds mapped to the UI theme's syntax names, first match
+/// wins. Kinds the theme does not style keep Mockaco's built-in color.
+const SYNTAX_MAP: &[(&str, &[&str])] = &[
+    ("keyword", &["keyword"]),
+    ("keyword.operator", &["keyword", "operator"]),
+    ("function", &["function"]),
+    ("function.method", &["function"]),
+    ("function.macro", &["function", "preproc"]),
+    ("type", &["type", "enum"]),
+    ("type.builtin", &["type"]),
+    ("constructor", &["constructor", "type"]),
+    ("string", &["string"]),
+    ("character", &["string"]),
+    ("escape", &["string.escape", "string"]),
+    ("comment", &["comment"]),
+    ("comment.documentation", &["comment.doc", "comment"]),
+    ("constant", &["constant", "boolean"]),
+    ("constant.builtin", &["constant", "boolean"]),
+    ("number", &["number"]),
+    ("attribute", &["attribute"]),
+    ("property", &["property"]),
+    ("variable", &["variable"]),
+    ("variable.parameter", &["variable"]),
+    ("variable.builtin", &["variable.special", "variable"]),
+    ("operator", &["operator"]),
+    ("punctuation.bracket", &["punctuation.bracket", "punctuation"]),
+    ("punctuation.delimiter", &["punctuation.delimiter", "punctuation"]),
+    ("punctuation.list_marker", &["punctuation.list_marker", "punctuation"]),
+    ("label", &["label"]),
+    ("tag", &["tag"]),
+    ("title", &["title"]),
+    ("link_text", &["link_text"]),
+    ("link_uri", &["link_uri"]),
+    ("emphasis", &["emphasis"]),
+    ("emphasis.strong", &["emphasis.strong"]),
+];
+
+fn syntax_theme(theme: &ui::Theme) -> mockaco_language::Theme {
+    let mut syntax = SurfaceTheme::default().syntax;
+    for (kind, names) in SYNTAX_MAP {
+        for name in *names {
+            let Some(style) = theme.highlight_theme.style(name) else {
+                continue;
+            };
+            let Some(color) = style.color else {
+                continue;
+            };
+            let color = surface_color_from_hsla(color.solid);
+            syntax.set_token_style(
+                *kind,
+                mockaco_language::TokenStyle {
+                    foreground: mockaco_language::Rgba {
+                        red: color.red,
+                        green: color.green,
+                        blue: color.blue,
+                        alpha: color.alpha,
+                    },
+                    background: None,
+                    font: mockaco_language::FontStyle {
+                        bold: style.font_weight.is_some_and(|weight| weight >= FontWeight::SEMIBOLD),
+                        italic: matches!(style.font_style, Some(FontStyle::Italic)),
+                        underline: false,
+                    },
+                },
+            );
+            break;
+        }
+    }
+    syntax
+}
+
+fn surface_theme(theme: &ui::Theme) -> SurfaceTheme {
+    let editor = &theme.highlight_theme.style;
+    let active_line = editor
+        .editor_active_line
+        .map(surface_color_from_hsla)
+        .unwrap_or_else(|| with_alpha(surface_color_from_hsla(theme.list_active), 90));
+    let gutter_foreground = editor
+        .editor_line_number
+        .map(surface_color_from_hsla)
+        .unwrap_or_else(|| surface_color_from_hsla(theme.muted_foreground));
+    let background = surface_color_from_hsla(theme.background);
+    SurfaceTheme {
+        background,
+        gutter_background: background,
+        foreground: surface_color_from_hsla(theme.foreground),
+        gutter_foreground,
+        selection: surface_color_from_hsla(theme.selection),
+        primary_selection: surface_color_from_hsla(theme.selection),
+        caret: surface_color_from_hsla(theme.caret),
+        decoration: surface_color_from_hsla(theme.warning),
+        active_line,
+        syntax: syntax_theme(theme),
+    }
+}
+
 impl EventEmitter<TextEditorEvent> for TextEditor {}
 
 impl Focusable for TextEditor {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
-        self.focus_handle.clone()
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        match self.current_file() {
+            Some(file) => file.view.focus_handle(cx),
+            None => self.focus_handle.clone(),
+        }
     }
 }
 
 impl Render for TextEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.apply_theme(cx);
+
         let tabs = self.open_files.iter().enumerate().fold(
             h_flex()
                 .w_full()
@@ -718,8 +652,9 @@ impl Render for TextEditor {
                         .label(label)
                         .ghost()
                         .small()
-                        .on_click(cx.listener(move |this, _, _window, cx| {
+                        .on_click(cx.listener(move |this, _, window, cx| {
                             this.current_file_index = Some(index);
+                            this.focus_current(window, cx);
                             cx.notify();
                         })),
                 )
@@ -738,21 +673,92 @@ impl Render for TextEditor {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Mockaco editor"),
+                    .child(
+                        self.current_file()
+                            .map(|file| file.path.display().to_string())
+                            .unwrap_or_default(),
+                    ),
             )
             .child(
-                Button::new("save-file")
-                    .label(if dirty { "Save •" } else { "Save" })
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.save_current_file(window, cx);
-                    })),
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Button::new("generate-stress-file")
+                            .label(if self.generating {
+                                "Generating…"
+                            } else {
+                                "Generate 1M-line Rust file"
+                            })
+                            .ghost()
+                            .small()
+                            .disabled(self.generating)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.generate_stress_file(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("save-file")
+                            .label(if dirty { "Save •" } else { "Save" })
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.save_current_file(window, cx);
+                            })),
+                    ),
             );
-        let body = self.render_editor(cx);
+        let body = match self.current_file() {
+            Some(file) => div()
+                .id("editor-context-area")
+                .size_full()
+                .child(file.view.clone())
+                .context_menu(move |menu, _window, _cx| {
+                    menu.menu("Undo", Box::new(EditorUndo))
+                        .menu("Redo", Box::new(EditorRedo))
+                        .separator()
+                        .menu("Cut", Box::new(EditorCut))
+                        .menu("Copy", Box::new(EditorCopy))
+                        .menu("Paste", Box::new(EditorPaste))
+                        .separator()
+                        .menu("Select All", Box::new(EditorSelectAll))
+                        .menu("Unfold All", Box::new(EditorUnfoldAll))
+                        .separator()
+                        .menu("Save", Box::new(EditorSave))
+                        .menu("Copy File Path", Box::new(EditorCopyPath))
+                })
+                .into_any_element(),
+            None => v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .text_color(cx.theme().muted_foreground)
+                .child("Open a source file to begin editing")
+                .into_any_element(),
+        };
         v_flex()
             .size_full()
             .bg(cx.theme().background)
+            .key_context("MockacoHost")
+            .on_action(cx.listener(|this, _: &EditorUndo, _, cx| this.with_view(cx, |v, cx| v.undo(cx))))
+            .on_action(cx.listener(|this, _: &EditorRedo, _, cx| this.with_view(cx, |v, cx| v.redo(cx))))
+            .on_action(cx.listener(|this, _: &EditorCut, _, cx| this.with_view(cx, |v, cx| v.cut(cx))))
+            .on_action(cx.listener(|this, _: &EditorCopy, _, cx| this.with_view(cx, |v, cx| v.copy(cx))))
+            .on_action(cx.listener(|this, _: &EditorPaste, _, cx| this.with_view(cx, |v, cx| v.paste(cx))))
+            .on_action(cx.listener(|this, _: &EditorSelectAll, _, cx| {
+                this.with_view(cx, |v, cx| v.select_all(cx))
+            }))
+            .on_action(cx.listener(|this, _: &EditorUnfoldAll, _, cx| {
+                this.with_view(cx, |v, cx| v.unfold_all(cx))
+            }))
+            .on_action(cx.listener(|this, _: &EditorSave, window, cx| {
+                this.save_current_file(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &EditorCopyPath, _, cx| {
+                if let Some(path) = this.current_file_path() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(
+                        path.to_string_lossy().into_owned(),
+                    ));
+                }
+            }))
             .child(toolbar)
             .child(tabs)
             .child(div().flex_1().min_h_0().child(body))
