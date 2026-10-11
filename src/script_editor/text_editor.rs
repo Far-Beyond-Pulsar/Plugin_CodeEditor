@@ -6,6 +6,8 @@
 //! I/O, bridging the UI theme into Mockaco's theme, and forwarding document
 //! events to the rest of the plugin.
 
+mod lsp;
+
 use gpui::*;
 use mockaco_diff::DiffRowKind;
 use mockaco_gpui::native::{EditorEvent, WgpuiEditorView};
@@ -37,11 +39,6 @@ actions!(
 const FONT_FAMILY: &str = "JetBrains Mono";
 const FONT_SIZE: f32 = 14.0;
 const LINE_HEIGHT: f32 = 20.0;
-/// How long typing must pause before the full text is handed to listeners
-/// (rust-analyzer). Copying the document is O(its size), so it never happens
-/// per keystroke.
-const CHANGE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(300);
-
 #[derive(Clone)]
 pub enum TextEditorEvent {
     OpenFolderRequested(PathBuf),
@@ -51,11 +48,6 @@ pub enum TextEditorEvent {
         path: PathBuf,
         content: String,
     },
-    FileChanged {
-        path: PathBuf,
-        content: String,
-        version: i32,
-    },
     FileSaved {
         path: PathBuf,
         content: String,
@@ -63,6 +55,8 @@ pub enum TextEditorEvent {
     FileClosed {
         path: PathBuf,
     },
+    /// Go to definition landed in another file: zero-based line and UTF-16
+    /// column. The panel that owns this editor opens it.
     NavigateToLocation {
         path: PathBuf,
         line: u32,
@@ -74,10 +68,10 @@ pub struct OpenFile {
     pub path: PathBuf,
     pub view: Entity<WgpuiEditorView>,
     pub is_modified: bool,
+    /// Document version announced to the language server; bumped per edit.
     pub version: i32,
-    /// An edit not yet announced with `FileChanged`.
-    change_pending: bool,
-    _change_task: Option<Task<()>>,
+    /// The language server has this document open.
+    lsp_open: bool,
     _subscription: Subscription,
 }
 
@@ -87,6 +81,8 @@ pub struct TextEditor {
     current_file_index: Option<usize>,
     applied_theme: Option<SurfaceTheme>,
     generating: bool,
+    /// The engine's shared rust-analyzer, when this editor has one.
+    lsp: Option<lsp::LspClient>,
 }
 
 impl TextEditor {
@@ -101,23 +97,21 @@ impl TextEditor {
     pub fn new_with_settings(
         _window: &mut Window,
         cx: &mut Context<Self>,
-        _settings: plugin_editor_api::EditorSettingsSnapshot,
+        settings: plugin_editor_api::EditorSettingsSnapshot,
     ) -> Self {
-        Self {
+        let mut editor = Self {
             focus_handle: cx.focus_handle(),
             open_files: Vec::new(),
             current_file_index: None,
             applied_theme: None,
             generating: false,
+            lsp: None,
+        };
+        // The language server arrives through the plugin API's context.
+        if let Some(analyzer) = settings.services().language_server.clone() {
+            editor.set_rust_analyzer(analyzer, cx);
         }
-    }
-
-    pub fn set_rust_analyzer(
-        &mut self,
-        _analyzer: Entity<engine_backend::services::rust_analyzer_manager::RustAnalyzerManager>,
-        _cx: &mut Context<Self>,
-    ) {
-        // The ScriptEditor event bridge forwards Mockaco document changes.
+        editor
     }
 
     fn create_view(
@@ -139,6 +133,9 @@ impl TextEditor {
             view
         });
         view.update(cx, |view, cx| view.set_theme(theme, cx));
+        if self.lsp.is_some() && lsp::is_rust(path) {
+            view.update(cx, |view, cx| view.set_language_intelligence(true, cx));
+        }
         view
     }
 
@@ -155,9 +152,8 @@ impl TextEditor {
             view,
             is_modified: false,
             version: 1,
+            lsp_open: false,
             _subscription: subscription,
-            change_pending: false,
-            _change_task: None,
         });
         self.current_file_index = Some(self.open_files.len() - 1);
     }
@@ -178,14 +174,9 @@ impl TextEditor {
                 let was_modified = file.is_modified;
                 file.is_modified = true;
                 file.version = file.version.saturating_add(1);
-                file.change_pending = true;
-                // Replacing the task cancels the previous one: the full text
-                // is read once, after typing pauses.
-                let path = path.clone();
-                file._change_task = Some(cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(CHANGE_DEBOUNCE).await;
-                    let _ = this.update(cx, |this, cx| this.flush_change(&path, cx));
-                }));
+                // The server is told what changed, not the whole file: the
+                // editor logged the edits and this drains them.
+                self.lsp_sync(index, cx);
                 // Only the tab's dirty marker depends on this.
                 if !was_modified {
                     cx.notify();
@@ -194,6 +185,7 @@ impl TextEditor {
             EditorEvent::SaveRequested => {
                 self.save_file_at(index, cx);
             }
+            lsp_event => self.on_lsp_event(index, lsp_event, cx),
         }
     }
 
@@ -214,6 +206,7 @@ impl TextEditor {
         };
         let view = self.create_view(&path, content.clone(), cx);
         self.push_file(path.clone(), view, cx);
+        self.lsp_open_pending(cx);
         self.focus_current(window, cx);
         cx.emit(TextEditorEvent::FileOpened { path, content });
         cx.notify();
@@ -272,6 +265,7 @@ impl TextEditor {
                 view.set_line_backgrounds(backgrounds, cx);
             });
             self.current_file_index = Some(index);
+            self.lsp_sync(index, cx);
         } else {
             let view = self.create_view(&path, content, cx);
             view.update(cx, |view, cx| view.set_line_backgrounds(backgrounds, cx));
@@ -280,38 +274,16 @@ impl TextEditor {
         cx.notify();
     }
 
-    /// Announces `path`'s pending edits with one `FileChanged` carrying its
-    /// current text.
-    fn flush_change(&mut self, path: &PathBuf, cx: &mut Context<Self>) {
-        let Some(file) = self.open_files.iter_mut().find(|file| &file.path == path) else {
-            return;
-        };
-        if !std::mem::take(&mut file.change_pending) {
-            return;
-        }
-        let content = file.view.read(cx).text();
-        let version = file.version;
-        cx.emit(TextEditorEvent::FileChanged {
-            path: path.clone(),
-            content,
-            version,
-        });
-    }
-
     fn save_file_at(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
         let Some(file) = self.open_files.get(index) else {
             return false;
         };
         let path = file.path.clone();
-        // Listeners see the latest edits before the save.
-        self.flush_change(&path, cx);
-        let Some(file) = self.open_files.get(index) else {
-            return false;
-        };
         let content = file.view.read(cx).text();
         match fs::write(&path, &content) {
             Ok(()) => {
                 self.open_files[index].is_modified = false;
+                self.lsp_saved(index, &content, cx);
                 cx.emit(TextEditorEvent::FileSaved { path, content });
                 cx.notify();
                 true
@@ -338,6 +310,7 @@ impl TextEditor {
             return;
         }
         let file = self.open_files.remove(index);
+        self.lsp_close(&file, cx);
         cx.emit(TextEditorEvent::FileClosed { path: file.path });
         self.current_file_index = if self.open_files.is_empty() {
             None
@@ -716,6 +689,12 @@ impl Render for TextEditor {
                             .map(|file| file.path.display().to_string())
                             .unwrap_or_default(),
                     ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.lsp_status(cx)),
             )
             .child(
                 h_flex()

@@ -64,10 +64,6 @@ pub struct ScriptEditor {
     last_left_scroll: Option<Point<Pixels>>,
     /// Last known scroll offset for right editor (for sync)
     last_right_scroll: Option<Point<Pixels>>,
-    /// Keeps the analyzer event bridge subscription alive and replaceable.
-    _analyzer_sub: Option<Subscription>,
-    /// Last workspace root used to start rust-analyzer.
-    analyzer_workspace_root: Option<PathBuf>,
 }
 
 impl ScriptEditor {
@@ -93,13 +89,31 @@ impl ScriptEditor {
         let diff_resizable_state = ResizableState::new(cx);
 
         let file_explorer = cx.new(|cx| FileExplorer::new(window, cx));
+        // The host's context carries the engine's language server. The working
+        // editor attaches to it; the diff view shows historical text under real
+        // file names and must never be announced to the server.
+        let analyzer = settings.services().language_server.clone();
+        let diff_settings = settings
+            .clone()
+            .with_services(plugin_editor_api::EditorServices::default());
         let text_editor = cx.new(|cx| TextEditor::new_with_settings(window, cx, settings.clone()));
-        let diff_editor = cx.new(|cx| TextEditor::new_with_settings(window, cx, settings));
+        let diff_editor = cx.new(|cx| TextEditor::new_with_settings(window, cx, diff_settings));
 
-        // Forward text editor events
-        cx.subscribe(
+        // Forward text editor events; a go-to-definition into another file
+        // opens that file in this panel.
+        cx.subscribe_in(
             &text_editor,
-            |this: &mut Self, _editor, event: &TextEditorEvent, cx| {
+            window,
+            |this: &mut Self, _editor, event: &TextEditorEvent, window, cx| {
+                if let TextEditorEvent::NavigateToLocation {
+                    path,
+                    line,
+                    character,
+                } = event
+                {
+                    this.open_file(path.clone(), window, cx);
+                    this.go_to_line(*line as usize + 1, *character as usize + 1, window, cx);
+                }
                 cx.emit(event.clone());
             },
         )
@@ -112,14 +126,12 @@ impl ScriptEditor {
             diff_editor,
             diff_resizable_state,
             horizontal_resizable_state,
-            rust_analyzer: None,
+            rust_analyzer: analyzer,
             mode: ScriptEditorMode::Normal,
             diff_files: Vec::new(),
             selected_diff_index: None,
             last_left_scroll: None,
             last_right_scroll: None,
-            _analyzer_sub: None,
-            analyzer_workspace_root: None,
         }
     }
 
@@ -147,138 +159,36 @@ impl ScriptEditor {
         candidate
     }
 
+    /// Makes sure an analyzer is running for the file's workspace.
+    ///
+    /// The engine owns one analyzer for the project and starts it with the
+    /// project. An editor must attach to it, never restart it: starting here
+    /// would kill the running process and discard its index every time a
+    /// panel opens. It only starts one when none is running.
     fn ensure_analyzer_workspace(
         &mut self,
         workspace_root: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.analyzer_workspace_root.as_ref() == Some(&workspace_root) {
-            return;
-        }
-
         if let Some(analyzer) = self.rust_analyzer.clone() {
             analyzer.update(cx, |analyzer, cx| {
-                analyzer.start(workspace_root.clone(), window, cx);
+                analyzer.ensure_started(workspace_root, window, cx);
             });
-            self.analyzer_workspace_root = Some(workspace_root);
         }
     }
 
-    /// Set the global rust analyzer manager
+    /// Attaches the engine's shared rust-analyzer. The text editor owns the
+    /// document sync, diagnostics and requests from here on.
     pub fn set_rust_analyzer(
         &mut self,
         analyzer: Entity<RustAnalyzerManager>,
         cx: &mut Context<Self>,
     ) {
-        tracing::debug!("🔧 ScriptEditor::set_rust_analyzer called");
         self.rust_analyzer = Some(analyzer.clone());
-
-        // Pass it to the text editor
         self.text_editor.update(cx, |editor, cx| {
-            tracing::debug!("🔧 Passing rust-analyzer to TextEditor");
-            editor.set_rust_analyzer(analyzer.clone(), cx);
+            editor.set_rust_analyzer(analyzer, cx);
         });
-
-        // Subscribe to text editor events to forward to rust-analyzer.
-        // Store the subscription so repeated calls replace rather than stack.
-        self._analyzer_sub = Some(cx.subscribe(
-            &self.text_editor,
-            move |this: &mut Self, _editor, event: &TextEditorEvent, cx| {
-                tracing::debug!(
-                    "📨 ScriptEditor received TextEditorEvent: {:?}",
-                    std::mem::discriminant(event)
-                );
-                if let Some(ref analyzer) = this.rust_analyzer {
-                    match event {
-                        TextEditorEvent::FileOpened { path, content } => {
-                            tracing::debug!("📂 ScriptEditor handling FileOpened: {:?}", path);
-                            // Notify rust-analyzer that a file was opened
-                            analyzer.update(cx, |analyzer, _cx| {
-                                let language_id =
-                                    if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                                        "rust"
-                                    } else {
-                                        "text"
-                                    };
-
-                                tracing::debug!(
-                                    "🚀 Calling did_open_file for {:?} (language: {})",
-                                    path.file_name(),
-                                    language_id
-                                );
-                                if let Err(e) = analyzer.did_open_file(path, content, language_id) {
-                                    tracing::error!(
-                                        "⚠️  Failed to notify rust-analyzer of file open: {}",
-                                        e
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "✓ Notified rust-analyzer: file opened {:?}",
-                                        path.file_name()
-                                    );
-                                }
-                            });
-                        }
-                        TextEditorEvent::FileSaved { path, content } => {
-                            tracing::debug!("💾 ScriptEditor handling FileSaved: {:?}", path);
-                            // Notify rust-analyzer that a file was saved
-                            analyzer.update(cx, |analyzer, _cx| {
-                                if let Err(e) = analyzer.did_save_file(path, content) {
-                                    tracing::error!(
-                                        "⚠️  Failed to notify rust-analyzer of file save: {}",
-                                        e
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "✓ Notified rust-analyzer: file saved {:?}",
-                                        path.file_name()
-                                    );
-                                }
-                            });
-                        }
-                        TextEditorEvent::FileChanged {
-                            path,
-                            content,
-                            version,
-                        } => {
-                            analyzer.update(cx, |analyzer, _cx| {
-                                if let Err(error) =
-                                    analyzer.did_change_file(path, content, *version)
-                                {
-                                    tracing::error!(
-                                        "Failed to notify rust-analyzer of change: {}",
-                                        error
-                                    );
-                                }
-                            });
-                        }
-                        TextEditorEvent::FileClosed { path } => {
-                            tracing::debug!("❌ ScriptEditor handling FileClosed: {:?}", path);
-                            // Notify rust-analyzer that a file was closed
-                            analyzer.update(cx, |analyzer, _cx| {
-                                if let Err(e) = analyzer.did_close_file(path) {
-                                    tracing::error!(
-                                        "⚠️  Failed to notify rust-analyzer of file close: {}",
-                                        e
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "✓ Notified rust-analyzer: file closed {:?}",
-                                        path.file_name()
-                                    );
-                                }
-                            });
-                        }
-                        _ => {}
-                    }
-                } else {
-                    tracing::debug!("⚠️  ScriptEditor: rust_analyzer is None!");
-                }
-            },
-        ));
-
-        tracing::debug!("✓ ScriptEditor rust-analyzer setup complete");
     }
 
     /// Set the project path and load it in the file explorer
