@@ -169,6 +169,10 @@ impl TextEditor {
             let path = file.path.clone();
             let view = file.view.clone();
             let text = view.read(cx).text();
+            // Analyse the file as part of its Cargo workspace, not as a loose file.
+            if let Err(error) = analyzer.read(cx).ensure_workspace_for(&path) {
+                tracing::debug!("could not add a workspace folder for {:?}: {}", path, error);
+            }
             let sent = analyzer.read(cx).did_open_file(&path, &text, "rust");
             match sent {
                 Ok(()) => {
@@ -308,6 +312,7 @@ impl TextEditor {
             tracing::info!("hover requested but the language server has no such document open (or is not running)");
             return;
         };
+        let log_uri = uri.clone();
         let params = position_params(&uri, request.position);
         let Ok(response) = analyzer
             .read(cx)
@@ -319,7 +324,13 @@ impl TextEditor {
             let Ok(response) = response.recv_async().await else {
                 return;
             };
-            tracing::info!("hover answered: {}", if hover_markdown(&response).is_some() { "docs" } else { "nothing" });
+            let raw = response.to_string();
+            tracing::info!(
+                "hover {log_uri} @ {}:{} -> {}",
+                request.position.line,
+                request.position.column,
+                raw.chars().take(300).collect::<String>()
+            );
             let content = hover_markdown(&response).map(|markdown| HoverContent::from_markdown(&markdown, None));
             let _ = view.update(cx, |view, cx| {
                 view.show_hover(request.id, request.version, content, cx)
