@@ -37,6 +37,10 @@ actions!(
 const FONT_FAMILY: &str = "JetBrains Mono";
 const FONT_SIZE: f32 = 14.0;
 const LINE_HEIGHT: f32 = 20.0;
+/// How long typing must pause before the full text is handed to listeners
+/// (rust-analyzer). Copying the document is O(its size), so it never happens
+/// per keystroke.
+const CHANGE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(300);
 
 #[derive(Clone)]
 pub enum TextEditorEvent {
@@ -71,6 +75,9 @@ pub struct OpenFile {
     pub view: Entity<WgpuiEditorView>,
     pub is_modified: bool,
     pub version: i32,
+    /// An edit not yet announced with `FileChanged`.
+    change_pending: bool,
+    _change_task: Option<Task<()>>,
     _subscription: Subscription,
 }
 
@@ -149,6 +156,8 @@ impl TextEditor {
             is_modified: false,
             version: 1,
             _subscription: subscription,
+            change_pending: false,
+            _change_task: None,
         });
         self.current_file_index = Some(self.open_files.len() - 1);
     }
@@ -156,7 +165,7 @@ impl TextEditor {
     fn on_editor_event(
         &mut self,
         path: &PathBuf,
-        view: &Entity<WgpuiEditorView>,
+        _view: &Entity<WgpuiEditorView>,
         event: &EditorEvent,
         cx: &mut Context<Self>,
     ) {
@@ -165,16 +174,22 @@ impl TextEditor {
         };
         match event {
             EditorEvent::Changed => {
-                let content = view.read(cx).text();
                 let file = &mut self.open_files[index];
+                let was_modified = file.is_modified;
                 file.is_modified = true;
                 file.version = file.version.saturating_add(1);
-                cx.emit(TextEditorEvent::FileChanged {
-                    path: path.clone(),
-                    content,
-                    version: self.open_files[index].version,
-                });
-                cx.notify();
+                file.change_pending = true;
+                // Replacing the task cancels the previous one: the full text
+                // is read once, after typing pauses.
+                let path = path.clone();
+                file._change_task = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(CHANGE_DEBOUNCE).await;
+                    let _ = this.update(cx, |this, cx| this.flush_change(&path, cx));
+                }));
+                // Only the tab's dirty marker depends on this.
+                if !was_modified {
+                    cx.notify();
+                }
             }
             EditorEvent::SaveRequested => {
                 self.save_file_at(index, cx);
@@ -265,11 +280,34 @@ impl TextEditor {
         cx.notify();
     }
 
+    /// Announces `path`'s pending edits with one `FileChanged` carrying its
+    /// current text.
+    fn flush_change(&mut self, path: &PathBuf, cx: &mut Context<Self>) {
+        let Some(file) = self.open_files.iter_mut().find(|file| &file.path == path) else {
+            return;
+        };
+        if !std::mem::take(&mut file.change_pending) {
+            return;
+        }
+        let content = file.view.read(cx).text();
+        let version = file.version;
+        cx.emit(TextEditorEvent::FileChanged {
+            path: path.clone(),
+            content,
+            version,
+        });
+    }
+
     fn save_file_at(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
         let Some(file) = self.open_files.get(index) else {
             return false;
         };
         let path = file.path.clone();
+        // Listeners see the latest edits before the save.
+        self.flush_change(&path, cx);
+        let Some(file) = self.open_files.get(index) else {
+            return false;
+        };
         let content = file.view.read(cx).text();
         match fs::write(&path, &content) {
             Ok(()) => {
