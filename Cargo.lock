@@ -1976,7 +1976,7 @@ dependencies = [
  "pulsar_lsp",
  "pulsar_physics",
  "pulsar_pie_abi",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scene",
  "pulsar_scene_model",
  "pulsar_scenedb",
@@ -2025,7 +2025,7 @@ dependencies = [
  "plugin_editor_api",
  "plugin_manager",
  "profiling 0.1.0",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "serde",
  "serde_json",
  "smol",
@@ -3315,7 +3315,7 @@ dependencies = [
  "meshopt",
  "openxr",
  "pollster 0.4.0",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "quark",
  "thiserror 2.0.20",
@@ -3371,6 +3371,7 @@ name = "helio-default-graphs"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "glam 0.33.8",
  "helio",
  "helio-core",
  "helio-mats",
@@ -3434,7 +3435,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3445,9 +3446,10 @@ name = "helio-pass-corona"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "glam 0.33.8",
  "helio-core",
  "helio-pass-gbuffer",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3470,7 +3472,7 @@ dependencies = [
  "helio-core",
  "helio-mats",
  "log",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3486,7 +3488,7 @@ dependencies = [
  "helio-pass-radiance-cascades",
  "helio-pass-shadow-matrix",
  "helio-pass-sky",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3531,7 +3533,7 @@ dependencies = [
  "glam 0.33.8",
  "helio-core",
  "log",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3548,7 +3550,7 @@ dependencies = [
  "helio-pass-gbuffer",
  "helio-pass-light-cull",
  "log",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3575,7 +3577,7 @@ dependencies = [
  "helio-pass-radiance-cascades",
  "helio-pass-shadow-matrix",
  "log",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3676,7 +3678,7 @@ dependencies = [
  "helio-core",
  "helio-pass-gbuffer",
  "log",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3702,7 +3704,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3777,7 +3779,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3793,7 +3795,7 @@ dependencies = [
  "helio-core",
  "helio-mats",
  "log",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
@@ -3868,7 +3870,7 @@ dependencies = [
  "helio-core",
  "helio-pass-postprocess",
  "helio-pass-shadow-matrix",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3894,7 +3896,7 @@ dependencies = [
  "bytemuck",
  "helio-core",
  "helio-pass-hiz",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "wgpu",
@@ -3970,7 +3972,7 @@ dependencies = [
  "plugin_editor_api",
  "psgc",
  "pulsar_events",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
@@ -5239,7 +5241,7 @@ dependencies = [
 [[package]]
 name = "mockaco-core"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=013dc636512de1670b00ec66502019c87d545437#013dc636512de1670b00ec66502019c87d545437"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
 dependencies = [
  "ropey 1.6.1",
 ]
@@ -5247,7 +5249,7 @@ dependencies = [
 [[package]]
 name = "mockaco-diff"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=013dc636512de1670b00ec66502019c87d545437#013dc636512de1670b00ec66502019c87d545437"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
 dependencies = [
  "mockaco-core",
  "similar 3.2.0",
@@ -5256,7 +5258,7 @@ dependencies = [
 [[package]]
 name = "mockaco-gpui"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=013dc636512de1670b00ec66502019c87d545437#013dc636512de1670b00ec66502019c87d545437"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
 dependencies = [
  "gpui-ce",
  "mockaco-core",
@@ -5268,7 +5270,7 @@ dependencies = [
 [[package]]
 name = "mockaco-language"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=013dc636512de1670b00ec66502019c87d545437#013dc636512de1670b00ec66502019c87d545437"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
 dependencies = [
  "mockaco-core",
  "streaming-iterator",
@@ -5279,7 +5281,7 @@ dependencies = [
 [[package]]
 name = "mockaco-renderer"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=013dc636512de1670b00ec66502019c87d545437#013dc636512de1670b00ec66502019c87d545437"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
 dependencies = [
  "mockaco-core",
 ]
@@ -5392,8 +5394,7 @@ dependencies = [
 [[package]]
 name = "naga"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a616d2fb8c89516ac2723a581f69d6c18576046bed761bd6b305e5618e6ae130"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -5418,8 +5419,7 @@ dependencies = [
 [[package]]
 name = "naga-types"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "590afbf58a6f4f62873cd5cff4468061844bafa1cdf399cc954537c22d768d49"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
@@ -6524,7 +6524,7 @@ dependencies = [
  "inventory",
  "pulsar_events",
  "pulsar_lsp",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_script_vm",
  "pulsar_world_registry",
  "schemars",
@@ -6863,7 +6863,7 @@ dependencies = [
  "engine_fs",
  "glam 0.33.8",
  "inventory",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_world_registry",
@@ -6906,7 +6906,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "engine_class_derive",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "pulsar_world_registry",
@@ -6929,7 +6929,7 @@ dependencies = [
  "gpui-ce",
  "inventory",
  "once_cell",
- "pulsar_reflection_derive 0.1.0",
+ "pulsar_reflection_derive",
  "serde",
  "serde_json",
  "tracing",
@@ -6938,34 +6938,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "pulsar_reflection"
-version = "0.1.0"
-source = "git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae#2dab12bfb147d813e508e1db0b5220ba9ba167ae"
-dependencies = [
- "dashmap",
- "glam 0.33.8",
- "inventory",
- "once_cell",
- "pulsar_reflection_derive 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "pulsar_reflection_codegen"
 version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "pulsar_reflection_codegen"
-version = "0.1.0"
-source = "git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae#2dab12bfb147d813e508e1db0b5220ba9ba167ae"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6978,19 +6952,7 @@ version = "0.1.0"
 dependencies = [
  "owo-colors",
  "proc-macro2",
- "pulsar_reflection_codegen 0.1.0",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "pulsar_reflection_derive"
-version = "0.1.0"
-source = "git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae#2dab12bfb147d813e508e1db0b5220ba9ba167ae"
-dependencies = [
- "owo-colors",
- "proc-macro2",
- "pulsar_reflection_codegen 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection_codegen",
  "quote",
  "syn 2.0.119",
 ]
@@ -7003,7 +6965,7 @@ dependencies = [
  "helio",
  "helio-asset-compat",
  "helio_component",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "serde",
  "serde_json",
  "tracing",
@@ -7015,7 +6977,7 @@ version = "0.1.0"
 dependencies = [
  "glam 0.33.8",
  "inventory",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "serde",
  "serde_json",
@@ -7031,7 +6993,7 @@ source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=685b1b0aa212b649
 dependencies = [
  "ahash",
  "profiling 0.1.0",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb_derive",
  "serde",
  "serde_json",
@@ -7046,7 +7008,7 @@ version = "0.1.0"
 source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=685b1b0aa212b64912549efd583c93480bea027f#685b1b0aa212b64912549efd583c93480bea027f"
 dependencies = [
  "proc-macro2",
- "pulsar_reflection_codegen 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection_codegen",
  "quote",
  "syn 2.0.119",
 ]
@@ -7065,7 +7027,7 @@ name = "pulsar_script_object_model"
 version = "0.1.0"
 dependencies = [
  "inventory",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_world_registry",
@@ -7082,7 +7044,7 @@ dependencies = [
  "bincode",
  "inventory",
  "libloading 0.9.0",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "serde",
  "serde_json",
@@ -7103,7 +7065,7 @@ version = "0.1.0"
 dependencies = [
  "inventory",
  "pulsar_events",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_script_math",
@@ -8074,7 +8036,7 @@ name = "scenedb-inspector-agent"
 version = "0.1.0"
 dependencies = [
  "log",
- "pulsar_reflection 0.1.0 (git+https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection?rev=2dab12bfb147d813e508e1db0b5220ba9ba167ae)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "serde_json",
  "shared_memory",
@@ -10229,7 +10191,7 @@ dependencies = [
  "parking_lot",
  "plugin_editor_api",
  "pulsar_auth",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "reqwest",
  "rust-i18n",
  "rust-i18n-macro",
@@ -10783,8 +10745,7 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 [[package]]
 name = "wgpu"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "527ccdf43dd5b2e8676eed9984ce00e2bbb0a1b85b70c1969dcb6cd2eb55ab9e"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.2",
@@ -10813,8 +10774,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c018fce9b6270aa203c2fdd56f3cce996713534bd757e4ea58c8560b121f14"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -10847,8 +10807,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-apple"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061f3d319a40d39d00b1ecc2c33b89fe21d4e6fe01859df3500a3a8ecccd6b68"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "wgpu-hal",
 ]
@@ -10856,8 +10815,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-emscripten"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98b86cf4abf524a902dd35f18ca6a3f08fc2ae9847c8f10b48e30491b1f0b86"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "wgpu-hal",
 ]
@@ -10865,8 +10823,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-windows-linux-android"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7586165fd5f6d881cb9ce4bb71f40d6caab2c0f1837e3fc1d9788a197fb6004f"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "wgpu-hal",
 ]
@@ -10874,8 +10831,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -10931,8 +10887,7 @@ dependencies = [
 [[package]]
 name = "wgpu-naga-bridge"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2f62e73117bb7a62bfd9c5a5841438a823f6566c6442a808ee269d2d055c081"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "naga",
  "wgpu-types",
@@ -10941,8 +10896,7 @@ dependencies = [
 [[package]]
 name = "wgpu-types"
 version = "30.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99dad6f1fbdbbdb4c278a6508b059d44688f5cebddf78d005a46a31340269286"
+source = "git+https://github.com/Far-Beyond-Pulsar/wgpu?branch=helio%2Fv30.0.1-reusable-command-buffers#1bac7e303fb4fe6a2532a98ba0526c35ce193d2f"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
