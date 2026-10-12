@@ -135,50 +135,8 @@ impl ScriptEditor {
         }
     }
 
-    fn resolve_workspace_root_for_file(path: &PathBuf) -> PathBuf {
-        let candidate = if path.is_file() {
-            path.parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| path.clone())
-        } else {
-            path.clone()
-        };
-
-        let mut current = candidate.as_path();
-        loop {
-            if current.join("Cargo.toml").exists() {
-                return current.to_path_buf();
-            }
-            if let Some(parent) = current.parent() {
-                current = parent;
-            } else {
-                break;
-            }
-        }
-
-        candidate
-    }
-
-    /// Makes sure an analyzer is running for the file's workspace.
-    ///
-    /// The engine owns one analyzer for the project and starts it with the
-    /// project. An editor must attach to it, never restart it: starting here
-    /// would kill the running process and discard its index every time a
-    /// panel opens. It only starts one when none is running.
-    fn ensure_analyzer_workspace(
-        &mut self,
-        workspace_root: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(analyzer) = self.rust_analyzer.clone() {
-            analyzer.update(cx, |analyzer, cx| {
-                analyzer.ensure_started(workspace_root, window, cx);
-            });
-        }
-    }
-
-    /// Attaches the engine's shared rust-analyzer. The text editor owns the
+    /// Attaches the engine's shared rust-analyzer. The editor never starts, stops
+    /// or re-roots it: where it runs is the engine's decision. The text editor owns the
     /// document sync, diagnostics and requests from here on.
     pub fn set_rust_analyzer(
         &mut self,
@@ -202,15 +160,12 @@ impl ScriptEditor {
             "📁 ScriptEditor::set_project_path called with: {:?}",
             project_path
         );
-        self.ensure_analyzer_workspace(project_path.clone(), window, cx);
         self.file_explorer.update(cx, |explorer, cx| {
             explorer.open_project(project_path, window, cx);
         });
     }
 
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let workspace_root = Self::resolve_workspace_root_for_file(&path);
-        self.ensure_analyzer_workspace(workspace_root, window, cx);
         self.text_editor.update(cx, |editor, cx| {
             editor.open_file(path, window, cx);
         });

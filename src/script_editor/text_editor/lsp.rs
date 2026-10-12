@@ -47,6 +47,9 @@ struct CompletionStore {
     items: Arc<Vec<Value>>,
 }
 
+/// Fallback for the characters rust-analyzer registers, used until it has told us.
+const SERVER_TRIGGER_CHARACTERS: [char; 4] = [':', '.', '\x27', '('];
+
 /// Whether the language server handles `path`.
 pub(super) fn is_rust(path: &PathBuf) -> bool {
     path.extension().and_then(|extension| extension.to_str()) == Some("rs")
@@ -161,6 +164,15 @@ impl TextEditor {
         if !analyzer.read(cx).is_initialized() {
             return;
         }
+        // Offer completion on whatever the server registered, as VS Code and Zed do.
+        let triggers = analyzer.read(cx).completion_trigger_characters();
+        if !triggers.is_empty() {
+            for file in self.open_files.iter().filter(|file| is_rust(&file.path)) {
+                let triggers = triggers.clone();
+                file.view
+                    .update(cx, |view, _| view.set_completion_triggers(triggers));
+            }
+        }
         for index in 0..self.open_files.len() {
             let file = &self.open_files[index];
             if file.lsp_open || !is_rust(&file.path) {
@@ -169,10 +181,6 @@ impl TextEditor {
             let path = file.path.clone();
             let view = file.view.clone();
             let text = view.read(cx).text();
-            // Analyse the file as part of its Cargo workspace, not as a loose file.
-            if let Err(error) = analyzer.read(cx).ensure_workspace_for(&path) {
-                tracing::debug!("could not add a workspace folder for {:?}: {}", path, error);
-            }
             let sent = analyzer.read(cx).did_open_file(&path, &text, "rust");
             match sent {
                 Ok(()) => {
@@ -347,29 +355,66 @@ impl TextEditor {
         cx: &mut Context<Self>,
     ) {
         let Some((analyzer, view, uri)) = self.lsp_target(index, cx) else {
+            tracing::info!("completion requested but the language server has no such document open (or is not running)");
             return;
         };
+        let mut server_triggers = analyzer.read(cx).completion_trigger_characters();
+        if server_triggers.is_empty() {
+            server_triggers = SERVER_TRIGGER_CHARACTERS.to_vec();
+        }
         let mut params = position_params(&uri, request.position);
-        params["context"] = match trigger {
+        // Only the characters the server registered go as trigger characters;
+        // the rest (space, comma, brackets...) are ordinary invocations.
+        params["context"] = match trigger.filter(|c| server_triggers.contains(c)) {
             Some(character) => json!({ "triggerKind": 2, "triggerCharacter": character.to_string() }),
             None => json!({ "triggerKind": 1 }),
         };
-        let Ok(response) = analyzer
+        let Ok(first) = analyzer
             .read(cx)
-            .send_request_async("textDocument/completion", params)
+            .send_request_async("textDocument/completion", params.clone())
         else {
             return;
         };
         cx.spawn(async move |this, cx| {
-            let Ok(response) = response.recv_async().await else {
-                return;
+            let mut pending = first;
+            let mut attempts = 0;
+            // rust-analyzer cancels a request that races a fresh edit and
+            // says so with ContentModified/ServerCancelled; asking again
+            // gets the answer for the current text.
+            let response = loop {
+                let Ok(response) = pending.recv_async().await else {
+                    return;
+                };
+                let cancelled = matches!(error_code(&response), Some(-32801 | -32802));
+                if !cancelled || attempts >= 3 {
+                    break response;
+                }
+                attempts += 1;
+                let params = params.clone();
+                let analyzer = analyzer.clone();
+                let Ok(Some(next)) = this.update(cx, |_, cx| {
+                    analyzer
+                        .read(cx)
+                        .send_request_async("textDocument/completion", params)
+                        .ok()
+                }) else {
+                    return;
+                };
+                pending = next;
             };
             // A busy response holds thousands of items; turn them into menu
             // entries off the UI thread.
+            let head: String = response.to_string().chars().take(200).collect();
             let parsed = cx
                 .background_executor()
                 .spawn(async move { parse_completions(response) })
                 .await;
+            tracing::info!(
+                "completion {uri} @ {}:{} -> {} items ({head})",
+                request.position.line,
+                request.position.column,
+                parsed.as_ref().map_or(0, |(_, entries)| entries.len())
+            );
             let Some((items, entries)) = parsed else {
                 return;
             };
@@ -629,6 +674,11 @@ fn position_edits(edits: &Value) -> Vec<PositionEdit> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The JSON-RPC error code of a response, if it is an error.
+fn error_code(response: &Value) -> Option<i64> {
+    response.get("error")?.get("code")?.as_i64()
 }
 
 /// `(uri, line, character)` of the first definition in a
