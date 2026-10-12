@@ -769,6 +769,9 @@ fn completion_entry(item: &Value, host_data: u64) -> Option<CompletionEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `super::*` brings in `gpui::*`, whose `test` attribute would shadow the
+    // built-in one that `#[gpui::test]` expands to, and recurse.
+    use core::prelude::v1::test;
     use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
     use plugin_editor_api::{EditorServices, EditorSettingsSnapshot};
 

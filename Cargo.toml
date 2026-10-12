@@ -28,10 +28,10 @@ ui_types_common = { path = "../../../crates/editor/ui_types_common" }
 
 # Keep Mockaco and WGPUI on the same tree-sitter 0.25-compatible API.
 # The host adapter bridges clipboard/history/navigation on this API.
-mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "bf2b5da85a2b237def8c5c565c55fed9d526dcb2", features = ["native-wgpui"] }
-mockaco-language = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "bf2b5da85a2b237def8c5c565c55fed9d526dcb2" }
-mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "bf2b5da85a2b237def8c5c565c55fed9d526dcb2" }
-mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "bf2b5da85a2b237def8c5c565c55fed9d526dcb2" }
+mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "dcddddffea6b4b6b9289337d6b42f9e22ec264ee", features = ["native-wgpui"] }
+mockaco-language = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "dcddddffea6b4b6b9289337d6b42f9e22ec264ee" }
+mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "dcddddffea6b4b6b9289337d6b42f9e22ec264ee" }
+mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "dcddddffea6b4b6b9289337d6b42f9e22ec264ee" }
 
 # Engine dependencies
 engine_state  = { path = "../../../crates/core/engine_state" }
@@ -67,6 +67,20 @@ schemars = { version = "1.2", features = ["derive"] }
 # monorepo currently ships, or Cargo compiles a second, incompatible copy and
 # types split (duplicate World/ComponentId/Pod, separate profiler statics,
 # mismatched Panel traits).
+# Helio records reusable command buffers, which needs the root workspace's
+# wgpu fork (upstream v30.0.1 plus one commit). Mirrors its [patch.crates-io];
+# change it together with the root's.
+[patch.crates-io]
+naga = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu-core = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu-core-deps-apple = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu-core-deps-emscripten = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu-hal = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu-naga-bridge = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+wgpu-types = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", branch = "helio/v30.0.1-reusable-command-buffers" }
+
 [patch."https://github.com/Far-Beyond-Pulsar/WGPUI"]
 gpui-ce = { path = "../../../crates/ui/wgpui" }
 
@@ -103,10 +117,15 @@ tool_registry_macros = { path = "../../../crates/third-party/toolbelt/crates/too
 psgc = { path = "../../../crates/third-party/psgc/crates/psgc" }
 wgsl_std = { path = "../../../crates/third-party/psgc/crates/wgsl_std" }
 
+# Pulsar-Reflection resolves to the Pulsar checkout's submodule, as in
+# Pulsar-Native's own root manifest: the engine crates this workspace builds
+# from that checkout depend on it by path, so a git copy here (SceneDB's pin,
+# this workspace's own) would be a second `pulsar_reflection` whose types do
+# not match theirs.
 [patch."https://github.com/Far-Beyond-Pulsar/Pulsar-Reflection"]
-pulsar_reflection = { git = "https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection", rev = "2dab12bfb147d813e508e1db0b5220ba9ba167ae" }
-pulsar_reflection_derive = { git = "https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection", rev = "2dab12bfb147d813e508e1db0b5220ba9ba167ae" }
-pulsar_reflection_codegen = { git = "https://github.com//Far-Beyond-Pulsar/Pulsar-Reflection", rev = "2dab12bfb147d813e508e1db0b5220ba9ba167ae" }
+pulsar_reflection = { path = "../../../crates/external/pulsar-reflection/crates/pulsar_reflection" }
+pulsar_reflection_derive = { path = "../../../crates/external/pulsar-reflection/crates/pulsar_reflection_derive" }
+pulsar_reflection_codegen = { path = "../../../crates/external/pulsar-reflection/crates/pulsar_reflection_codegen" }
 
 # SceneDB: patched to the workspace revision so every dependency uses one
 # `World`/`ComponentId` type identity across the engine and Helio.
