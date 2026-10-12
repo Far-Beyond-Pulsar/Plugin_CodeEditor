@@ -2,9 +2,13 @@
 //!
 //! Mockaco owns everything about the editing surface: text layout, syntax
 //! highlighting, folding, caret/selection, scrolling, scrollbars, minimap and
-//! input. This module only does what is specific to Pulsar: file tabs, file
-//! I/O, bridging the UI theme into Mockaco's theme, and forwarding document
-//! events to the rest of the plugin.
+//! input. This module only does what is specific to Pulsar: the set of open
+//! documents, file I/O, bridging the UI theme into Mockaco's theme, and
+//! forwarding document events to the rest of the plugin.
+//!
+//! It is headless: it renders nothing. Each open document is shown by a
+//! [`super::FilePanel`] living in the editor's dock, which is what gives the
+//! editor real tabs, splits and drag-and-drop.
 
 mod lsp;
 
@@ -15,11 +19,7 @@ use mockaco_gpui::{DiffSplitSurface, EditorSurface, Language, SurfaceColor, Surf
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
-use ui::{
-    button::{Button, ButtonVariants as _},
-    context_menu::ContextMenuExt as _,
-    h_flex, v_flex, ActiveTheme as _, Disableable as _, Sizable as _,
-};
+use ui::ActiveTheme as _;
 
 actions!(
     mockaco_editor,
@@ -354,6 +354,74 @@ impl TextEditor {
         }
     }
 
+    /// The editor view of the document at `path`, if it is open.
+    pub fn view_for(&self, path: &std::path::Path) -> Option<Entity<WgpuiEditorView>> {
+        self.open_files
+            .iter()
+            .find(|file| file.path == path)
+            .map(|file| file.view.clone())
+    }
+
+    /// The editor view of the current document, if any.
+    pub fn current_view(&self) -> Option<Entity<WgpuiEditorView>> {
+        self.current_file().map(|file| file.view.clone())
+    }
+
+    pub fn has_open_files(&self) -> bool {
+        !self.open_files.is_empty()
+    }
+
+    pub fn is_generating(&self) -> bool {
+        self.generating
+    }
+
+    pub fn is_modified(&self, path: &std::path::Path) -> bool {
+        self.open_files
+            .iter()
+            .any(|file| file.path == path && file.is_modified)
+    }
+
+    pub fn current_is_modified(&self) -> bool {
+        self.current_file().is_some_and(|file| file.is_modified)
+    }
+
+    /// Makes the document at `path` the current one (the dock activated or
+    /// focused its tab).
+    pub fn activate_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Some(index) = self.open_files.iter().position(|file| file.path == path) else {
+            return;
+        };
+        if self.current_file_index != Some(index) {
+            self.current_file_index = Some(index);
+            cx.notify();
+        }
+    }
+
+    pub fn save_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) -> bool {
+        match self.open_files.iter().position(|file| file.path == path) {
+            Some(index) => self.save_file_at(index, cx),
+            None => false,
+        }
+    }
+
+    /// Drops the document at `path` (its dock tab was closed) and tells the
+    /// language server. Idempotent.
+    pub fn close_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Some(index) = self.open_files.iter().position(|file| file.path == path) else {
+            return;
+        };
+        let file = self.open_files.remove(index);
+        self.lsp_close(&file, cx);
+        cx.emit(TextEditorEvent::FileClosed { path: file.path });
+        self.current_file_index = match self.current_file_index {
+            _ if self.open_files.is_empty() => None,
+            Some(current) if current > index => Some(current - 1),
+            Some(current) => Some(current.min(self.open_files.len() - 1)),
+            None => None,
+        };
+        cx.notify();
+    }
+
     fn current_file(&self) -> Option<&OpenFile> {
         self.current_file_index
             .and_then(|index| self.open_files.get(index))
@@ -363,16 +431,6 @@ impl TextEditor {
         if let Some(file) = self.current_file() {
             let handle = file.view.focus_handle(cx);
             window.focus(&handle, cx);
-        }
-    }
-
-    fn with_view(
-        &mut self,
-        cx: &mut Context<Self>,
-        f: impl FnOnce(&mut WgpuiEditorView, &mut Context<WgpuiEditorView>),
-    ) {
-        if let Some(file) = self.current_file() {
-            file.view.update(cx, f);
         }
     }
 
@@ -406,7 +464,7 @@ impl TextEditor {
     }
 
     /// Pushes the active UI theme into every open editor when it changes.
-    fn apply_theme(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn apply_theme(&mut self, cx: &mut Context<Self>) {
         let theme = surface_theme(cx.theme());
         if self.applied_theme.as_ref() == Some(&theme) {
             return;
@@ -633,151 +691,5 @@ impl Focusable for TextEditor {
             Some(file) => file.view.focus_handle(cx),
             None => self.focus_handle.clone(),
         }
-    }
-}
-
-impl Render for TextEditor {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.apply_theme(cx);
-
-        let tabs = self.open_files.iter().enumerate().fold(
-            h_flex()
-                .w_full()
-                .h(px(34.0))
-                .gap_1()
-                .border_b_1()
-                .border_color(cx.theme().border),
-            |tabs, (index, file)| {
-                let name = file
-                    .path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("Untitled");
-                let label = if file.is_modified {
-                    format!("{name} •")
-                } else {
-                    name.to_owned()
-                };
-                tabs.child(
-                    Button::new(format!("file-tab-{index}"))
-                        .label(label)
-                        .ghost()
-                        .small()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.current_file_index = Some(index);
-                            this.focus_current(window, cx);
-                            cx.notify();
-                        })),
-                )
-            },
-        );
-        let dirty = self.current_file().is_some_and(|file| file.is_modified);
-        let toolbar = h_flex()
-            .w_full()
-            .h(px(36.0))
-            .px_2()
-            .items_center()
-            .justify_between()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        self.current_file()
-                            .map(|file| file.path.display().to_string())
-                            .unwrap_or_default(),
-                    ),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.lsp_status(cx)),
-            )
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        Button::new("generate-stress-file")
-                            .label(if self.generating {
-                                "Generating…"
-                            } else {
-                                "Generate 1M-line Rust file"
-                            })
-                            .ghost()
-                            .small()
-                            .disabled(self.generating)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.generate_stress_file(window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("save-file")
-                            .label(if dirty { "Save •" } else { "Save" })
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.save_current_file(window, cx);
-                            })),
-                    ),
-            );
-        let body = match self.current_file() {
-            Some(file) => div()
-                .id("editor-context-area")
-                .size_full()
-                .child(file.view.clone())
-                .context_menu(move |menu, _window, _cx| {
-                    menu.menu("Undo", Box::new(EditorUndo))
-                        .menu("Redo", Box::new(EditorRedo))
-                        .separator()
-                        .menu("Cut", Box::new(EditorCut))
-                        .menu("Copy", Box::new(EditorCopy))
-                        .menu("Paste", Box::new(EditorPaste))
-                        .separator()
-                        .menu("Select All", Box::new(EditorSelectAll))
-                        .menu("Unfold All", Box::new(EditorUnfoldAll))
-                        .separator()
-                        .menu("Save", Box::new(EditorSave))
-                        .menu("Copy File Path", Box::new(EditorCopyPath))
-                })
-                .into_any_element(),
-            None => v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .text_color(cx.theme().muted_foreground)
-                .child("Open a source file to begin editing")
-                .into_any_element(),
-        };
-        v_flex()
-            .size_full()
-            .bg(cx.theme().background)
-            .key_context("MockacoHost")
-            .on_action(cx.listener(|this, _: &EditorUndo, _, cx| this.with_view(cx, |v, cx| v.undo(cx))))
-            .on_action(cx.listener(|this, _: &EditorRedo, _, cx| this.with_view(cx, |v, cx| v.redo(cx))))
-            .on_action(cx.listener(|this, _: &EditorCut, _, cx| this.with_view(cx, |v, cx| v.cut(cx))))
-            .on_action(cx.listener(|this, _: &EditorCopy, _, cx| this.with_view(cx, |v, cx| v.copy(cx))))
-            .on_action(cx.listener(|this, _: &EditorPaste, _, cx| this.with_view(cx, |v, cx| v.paste(cx))))
-            .on_action(cx.listener(|this, _: &EditorSelectAll, _, cx| {
-                this.with_view(cx, |v, cx| v.select_all(cx))
-            }))
-            .on_action(cx.listener(|this, _: &EditorUnfoldAll, _, cx| {
-                this.with_view(cx, |v, cx| v.unfold_all(cx))
-            }))
-            .on_action(cx.listener(|this, _: &EditorSave, window, cx| {
-                this.save_current_file(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &EditorCopyPath, _, cx| {
-                if let Some(path) = this.current_file_path() {
-                    cx.write_to_clipboard(ClipboardItem::new_string(
-                        path.to_string_lossy().into_owned(),
-                    ));
-                }
-            }))
-            .child(toolbar)
-            .child(tabs)
-            .child(div().flex_1().min_h_0().child(body))
     }
 }

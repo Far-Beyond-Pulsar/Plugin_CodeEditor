@@ -14,9 +14,13 @@ use gpui::*;
 use rust_i18n::t;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use ui::{
-    ActiveTheme, StyledExt,
-    dock::{Panel, PanelEvent},
+    ActiveTheme, Disableable as _, Sizable as _, StyledExt,
+    button::{Button, ButtonVariants as _},
+    dock::{
+        DockArea, DockChannel, DockItem, Panel, PanelEvent, PanelStyle, PanelView, TabPanel,
+    },
     h_flex,
     resizable::{ResizableState, h_resizable, resizable_panel},
     v_flex,
@@ -46,8 +50,15 @@ pub struct DiffFileEntry {
 pub struct ScriptEditor {
     focus_handle: FocusHandle,
     file_explorer: Entity<FileExplorer>,
+    /// The open documents and their language-server sync. Headless: the dock
+    /// below shows them, one [`FilePanel`] per document.
     text_editor: Entity<TextEditor>,
-    /// Second editor for diff mode
+    /// Tabs, splits and drag-and-drop for the open documents.
+    dock_area: Entity<DockArea>,
+    file_panels: HashMap<PathBuf, WeakEntity<FilePanel>>,
+    /// Left side of diff mode (the original text)
+    diff_before_editor: Entity<TextEditor>,
+    /// Right side of diff mode (the changed text)
     diff_editor: Entity<TextEditor>,
     /// Resizable state for diff mode split
     diff_resizable_state: Entity<ResizableState>,
@@ -97,7 +108,24 @@ impl ScriptEditor {
             .clone()
             .with_services(plugin_editor_api::EditorServices::default());
         let text_editor = cx.new(|cx| TextEditor::new_with_settings(window, cx, settings.clone()));
+        let diff_before_editor =
+            cx.new(|cx| TextEditor::new_with_settings(window, cx, diff_settings.clone()));
         let diff_editor = cx.new(|cx| TextEditor::new_with_settings(window, cx, diff_settings));
+
+        // Its own channel keeps tabs dragged here from landing in other docks.
+        let dock_area = cx.new(|cx| {
+            DockArea::new_with_channel("script-editor-dock", None, DockChannel(6), window, cx)
+                .panel_style(PanelStyle::TabBar)
+        });
+        dock_area.update(cx, |dock_area, cx| {
+            dock_area.set_toggle_button_visible(false, cx);
+        });
+        let weak_dock = dock_area.downgrade();
+        let center = DockItem::tabs(Vec::new(), None, &weak_dock, window, cx);
+        dock_area.update(cx, |dock_area, cx| dock_area.set_center(center, window, cx));
+
+        // The toolbar and the tabs' dirty markers follow the documents.
+        cx.observe(&text_editor, |_, _, cx| cx.notify()).detach();
 
         // Forward text editor events; a go-to-definition into another file
         // opens that file in this panel.
@@ -123,6 +151,9 @@ impl ScriptEditor {
             focus_handle: cx.focus_handle(),
             file_explorer,
             text_editor,
+            dock_area,
+            file_panels: HashMap::new(),
+            diff_before_editor,
             diff_editor,
             diff_resizable_state,
             horizontal_resizable_state,
@@ -165,10 +196,91 @@ impl ScriptEditor {
         });
     }
 
+    /// Opens `path` as a tab in the dock, or activates its tab if it is open.
+    /// A new tab joins the group of the file that was current, so a split
+    /// keeps receiving files where the user is working.
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let existing = self.file_panels.get(&path).and_then(|panel| panel.upgrade());
+        let target = self.target_tab_panel(cx);
+
         self.text_editor.update(cx, |editor, cx| {
-            editor.open_file(path, window, cx);
+            editor.open_file(path.clone(), window, cx);
         });
+
+        if let Some(panel) = existing {
+            self.activate_panel(&panel, window, cx);
+            return;
+        }
+        let Some(view) = self.text_editor.read(cx).view_for(&path) else {
+            return;
+        };
+
+        let text_editor = self.text_editor.clone();
+        let panel_path = path.clone();
+        let panel = cx.new(|cx| FilePanel::new(text_editor, panel_path, view, window, cx));
+        self.file_panels.insert(path, panel.downgrade());
+
+        let view: Arc<dyn PanelView> = Arc::new(panel);
+        match target {
+            Some(tab_panel) => {
+                tab_panel.update(cx, |tab_panel, cx| tab_panel.add_panel(view, window, cx));
+            }
+            // Every group was closed, which removes them from the dock.
+            None => {
+                let weak_dock = self.dock_area.downgrade();
+                let center = DockItem::tabs(vec![view], Some(0), &weak_dock, window, cx);
+                self.dock_area
+                    .update(cx, |dock_area, cx| dock_area.set_center(center, window, cx));
+            }
+        }
+        cx.notify();
+    }
+
+    /// The tab group a new file should join.
+    fn target_tab_panel(&self, cx: &App) -> Option<Entity<TabPanel>> {
+        let groups = self.dock_area.read(cx).tab_panels(cx);
+        let current = self
+            .text_editor
+            .read(cx)
+            .current_file_path()
+            .and_then(|path| self.file_panels.get(&path)?.upgrade());
+        if let Some(panel) = current {
+            if let Some(group) = Self::group_of(&groups, &panel, cx) {
+                return Some(group);
+            }
+        }
+        groups.into_iter().next().map(|(_, group)| group)
+    }
+
+    fn group_of(
+        groups: &[(ui::dock::DockPlacement, Entity<TabPanel>)],
+        panel: &Entity<FilePanel>,
+        cx: &App,
+    ) -> Option<Entity<TabPanel>> {
+        let id = panel.entity_id();
+        groups
+            .iter()
+            .find(|(_, group)| group.read(cx).index_of_panel_by_entity_id(id).is_some())
+            .map(|(_, group)| group.clone())
+    }
+
+    fn activate_panel(
+        &mut self,
+        panel: &Entity<FilePanel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let groups = self.dock_area.read(cx).tab_panels(cx);
+        if let Some(group) = Self::group_of(&groups, panel, cx) {
+            let id = panel.entity_id();
+            group.update(cx, |group, cx| {
+                if let Some(index) = group.index_of_panel_by_entity_id(id) {
+                    group.set_active_tab(index, window, cx);
+                }
+            });
+        }
+        let handle = Focusable::focus_handle(panel.read(cx), cx);
+        window.focus(&handle, cx);
     }
 
     pub fn get_file_explorer(&self) -> &Entity<FileExplorer> {
@@ -209,9 +321,23 @@ impl ScriptEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.text_editor.update(cx, |editor, cx| {
-            editor.close_current_file(window, cx);
-        });
+        let Some(path) = self.text_editor.read(cx).current_file_path() else {
+            return;
+        };
+        let Some(panel) = self.file_panels.get(&path).and_then(|panel| panel.upgrade()) else {
+            return;
+        };
+        if self.text_editor.read(cx).is_modified(&path) {
+            return;
+        }
+        let groups = self.dock_area.read(cx).tab_panels(cx);
+        if let Some(group) = Self::group_of(&groups, &panel, cx) {
+            let view: Arc<dyn PanelView> = Arc::new(panel);
+            group.update(cx, |group, cx| group.remove_panel(view, window, cx));
+        }
+        self.file_panels.remove(&path);
+        self.text_editor
+            .update(cx, |editor, cx| editor.close_path(&path, cx));
     }
 
     /// Enter diff mode with a list of files and their before/after content
@@ -292,7 +418,7 @@ impl ScriptEditor {
             let path = PathBuf::from(&file.path);
 
             // Load "before" content into main editor with diff highlighting
-            self.text_editor.update(cx, |editor, cx| {
+            self.diff_before_editor.update(cx, |editor, cx| {
                 editor.load_content_with_diff_highlight(
                     path.clone(),
                     before_content.clone(),
@@ -496,6 +622,74 @@ impl EventEmitter<PanelEvent> for ScriptEditor {}
 impl EventEmitter<text_editor::TextEditorEvent> for ScriptEditor {}
 
 impl ScriptEditor {
+    fn editor_view(editor: &Entity<TextEditor>, cx: &App) -> AnyElement {
+        match editor.read(cx).current_view() {
+            Some(view) => view.into_any_element(),
+            None => div().into_any_element(),
+        }
+    }
+
+    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let editor = self.text_editor.read(cx);
+        let path = editor
+            .current_file_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_default();
+        let dirty = editor.current_is_modified();
+        let generating = editor.is_generating();
+        let status = editor.lsp_status(cx);
+
+        h_flex()
+            .w_full()
+            .h(px(36.0))
+            .px_2()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(path),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Button::new("generate-stress-file")
+                            .label(if generating {
+                                "Generating…"
+                            } else {
+                                "Generate 1M-line Rust file"
+                            })
+                            .ghost()
+                            .small()
+                            .disabled(generating)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.text_editor
+                                    .update(cx, |editor, cx| editor.generate_stress_file(window, cx));
+                            })),
+                    )
+                    .child(
+                        Button::new("save-file")
+                            .label(if dirty { "Save •" } else { "Save" })
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.text_editor
+                                    .update(cx, |editor, cx| editor.save_current_file(window, cx));
+                            })),
+                    ),
+            )
+    }
+
     /// Synchronize scroll positions between left and right editors in diff mode
     fn sync_diff_editor_scrolls(&mut self, cx: &mut Context<Self>) {
         if self.mode != ScriptEditorMode::Diff {
@@ -504,7 +698,7 @@ impl ScriptEditor {
 
         // Get current scroll positions
         let left_scroll = self
-            .text_editor
+            .diff_before_editor
             .update(cx, |editor, cx| editor.get_current_scroll_offset(cx));
 
         let right_scroll = self
@@ -526,7 +720,7 @@ impl ScriptEditor {
         else if self.last_right_scroll != right_scroll {
             // Right editor changed, sync left to match
             if let Some(offset) = right_scroll {
-                self.text_editor.update(cx, |editor, cx| {
+                self.diff_before_editor.update(cx, |editor, cx| {
                     editor.set_scroll_offset(offset, cx);
                 });
                 self.last_left_scroll = Some(offset);
@@ -538,6 +732,12 @@ impl ScriptEditor {
 
 impl Render for ScriptEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The editors render nothing themselves, so they pick up a theme
+        // change here.
+        for editor in [&self.text_editor, &self.diff_before_editor, &self.diff_editor] {
+            editor.update(cx, |editor, cx| editor.apply_theme(cx));
+        }
+
         // Synchronize scroll positions in diff mode
         self.sync_diff_editor_scrolls(cx);
 
@@ -559,10 +759,25 @@ impl Render for ScriptEditor {
 
         let editor_panel = match self.mode {
             ScriptEditorMode::Normal => {
-                // Single editor
-                div()
+                let body = if self.text_editor.read(cx).has_open_files() {
+                    div()
+                        .size_full()
+                        .child(self.dock_area.clone())
+                        .into_any_element()
+                } else {
+                    v_flex()
+                        .size_full()
+                        .items_center()
+                        .justify_center()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("CodeEditor.OpenFileHint").to_string())
+                        .into_any_element()
+                };
+                v_flex()
                     .size_full()
-                    .child(self.text_editor.clone())
+                    .bg(cx.theme().background)
+                    .child(self.render_toolbar(cx))
+                    .child(div().flex_1().min_h_0().child(body))
                     .into_any_element()
             }
             ScriptEditorMode::Diff => {
@@ -621,7 +836,7 @@ impl Render for ScriptEditor {
                                             .bg(cx.theme().background)
                                             .border_r_1()
                                             .border_color(cx.theme().border)
-                                            .child(self.text_editor.clone()),
+                                            .child(Self::editor_view(&self.diff_before_editor, cx)),
                                     ),
                                 )
                                 .child(
@@ -629,7 +844,7 @@ impl Render for ScriptEditor {
                                         div()
                                             .size_full()
                                             .bg(cx.theme().background)
-                                            .child(self.diff_editor.clone()),
+                                            .child(Self::editor_view(&self.diff_editor, cx)),
                                     ),
                                 ),
                         ),
