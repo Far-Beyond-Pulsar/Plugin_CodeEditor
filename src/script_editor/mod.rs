@@ -638,6 +638,7 @@ impl ScriptEditor {
         let dirty = editor.current_is_modified();
         let generating = editor.is_generating();
         let status = editor.lsp_status(cx);
+        let view_focus = editor.current_view().map(|view| view.focus_handle(cx));
 
         h_flex()
             .w_full()
@@ -648,10 +649,16 @@ impl ScriptEditor {
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(path),
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(Self::render_menus(view_focus))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(path),
+                    ),
             )
             .child(
                 div()
@@ -688,6 +695,44 @@ impl ScriptEditor {
                             })),
                     ),
             )
+    }
+
+    /// The editor's menu strip (Pulsar-Native#1012). Its items dispatch to
+    /// the open file's view, whose panel handles them as it does for the
+    /// context menu and the keys.
+    fn render_menus(view_focus: Option<FocusHandle>) -> impl IntoElement {
+        use text_editor::{
+            EditorCopy, EditorCopyPath, EditorCut, EditorPaste, EditorRedo, EditorSave,
+            EditorSelectAll, EditorUndo, EditorUnfoldAll,
+        };
+        let open = view_focus.is_some();
+        let strip = plugin_editor_api::EditorMenuStrip::new("script-editor-menus")
+            .menu(
+                plugin_editor_api::EditorMenu::new("File")
+                    .action_if("Save", EditorSave, open)
+                    .action_if("Copy File Path", EditorCopyPath, open),
+            )
+            .menu(
+                plugin_editor_api::EditorMenu::new("Edit")
+                    .action_if("Undo", EditorUndo, open)
+                    .action_if("Redo", EditorRedo, open)
+                    .separator()
+                    .action_if("Cut", EditorCut, open)
+                    .action_if("Copy", EditorCopy, open)
+                    .action_if("Paste", EditorPaste, open),
+            )
+            .menu(
+                plugin_editor_api::EditorMenu::new("Selection")
+                    .action_if("Select All", EditorSelectAll, open),
+            )
+            .menu(
+                plugin_editor_api::EditorMenu::new("View")
+                    .action_if("Unfold All", EditorUnfoldAll, open),
+            );
+        match view_focus {
+            Some(focus) => strip.action_context(focus),
+            None => strip,
+        }
     }
 
     /// Synchronize scroll positions between left and right editors in diff mode
