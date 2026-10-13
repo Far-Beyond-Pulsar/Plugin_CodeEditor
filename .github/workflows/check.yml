@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Far-Beyond-Pulsar/Pulsar-Native
-          ref: 55aa2dba1c3cd5ddc31d7664985670a2414a4eb6
+          ref: 6c61db9aacb29efc4a49bc23a7b1622eb6510a61
           submodules: recursive
           path: pulsar
 
