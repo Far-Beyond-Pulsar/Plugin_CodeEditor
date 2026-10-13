@@ -132,8 +132,8 @@ pulsar_reflection_codegen = { path = "../../../crates/external/pulsar-reflection
 # The patch VALUE uses the `//`-spelled URL: cargo refuses a patch that resolves
 # to the exact same source, so the alternate spelling carries the pushed rev.
 [patch."https://github.com/Far-Beyond-Pulsar/SceneDB"]
-pulsar_scenedb = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "685b1b0aa212b64912549efd583c93480bea027f" }
-pulsar_scenedb_derive = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "685b1b0aa212b64912549efd583c93480bea027f" }
+pulsar_scenedb = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "81bb3557b71014ccc00f1275f60138867cc492ea" }
+pulsar_scenedb_derive = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "81bb3557b71014ccc00f1275f60138867cc492ea" }
 
 [profile.dev.package."*"]
 # Keep our crate fast to compile, but optimize heavy dependencies
