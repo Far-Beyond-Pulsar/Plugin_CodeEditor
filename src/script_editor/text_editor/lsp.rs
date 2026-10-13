@@ -802,6 +802,7 @@ mod tests {
         let analyzer = vcx.update(|window, app| app.new(|cx| RustAnalyzerManager::new(window, cx)));
         let settings = EditorSettingsSnapshot::default().with_services(EditorServices {
             language_server: Some(analyzer),
+            ..Default::default()
         });
         let (attached, status) = status_of(settings, cx);
         assert!(attached, "the handle in the context was ignored");
