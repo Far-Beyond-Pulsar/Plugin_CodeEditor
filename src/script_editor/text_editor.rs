@@ -33,8 +33,28 @@ actions!(
         EditorUnfoldAll,
         EditorSave,
         EditorCopyPath,
+        EditorFind,
+        EditorReplace,
+        EditorFindNext,
+        EditorFindPrevious,
+        EditorFormatDocument,
+        EditorAddCursorAbove,
+        EditorAddCursorBelow,
+        EditorGoToLine,
+        EditorGoToDefinition,
+        EditorGoToReferences,
+        EditorGoToSymbol,
+        EditorGoToParentModule,
+        EditorExpandMacro,
+        EditorOpenCargoToml,
+        EditorReloadWorkspace,
+        EditorGenerateStressFile,
+        /// Closes the find, go-to-line or location bar.
+        EditorCloseBar,
     ]
 );
+
+pub use lsp::{LocationItem, LocationList};
 
 const FONT_FAMILY: &str = "JetBrains Mono";
 const FONT_SIZE: f32 = 14.0;
@@ -83,6 +103,9 @@ pub struct TextEditor {
     generating: bool,
     /// The engine's shared rust-analyzer, when this editor has one.
     lsp: Option<lsp::LspClient>,
+    /// What Go to References or Go to Symbol found, shown by the panel of
+    /// the file it was asked from.
+    locations: Option<LocationList>,
 }
 
 impl TextEditor {
@@ -106,6 +129,7 @@ impl TextEditor {
             applied_theme: None,
             generating: false,
             lsp: None,
+            locations: None,
         };
         // The language server arrives through the plugin API's context.
         if let Some(analyzer) = settings.services().language_server.clone() {
