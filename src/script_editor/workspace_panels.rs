@@ -923,14 +923,22 @@ mod tests {
             std::env::temp_dir().join(format!("pulsar_script_panel_{}.rs", std::process::id()));
         std::fs::write(&path, "fn a() {}\nfn b() { a(); a(); }\n").unwrap();
         let panel_path = path.clone();
-        let (panel, cx) = cx.add_window_view(move |window, cx| {
+        // As in the editor: the window's root is `ui::Root` (inputs paint
+        // through it), and the script editor holds the text editor, which
+        // the panel only refers to.
+        let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let created = slot.clone();
+        let (_root, cx) = cx.add_window_view(move |window, cx| {
             let editor = cx.new(|cx| TextEditor::new(window, cx));
             editor.update(cx, |editor, cx| {
                 editor.open_file(panel_path.clone(), window, cx)
             });
             let view = editor.read(cx).view_for(&panel_path).unwrap();
-            FilePanel::new(editor, panel_path, view, window, cx)
+            let panel = cx.new(|cx| FilePanel::new(editor.clone(), panel_path, view, window, cx));
+            *created.borrow_mut() = Some((editor, panel.clone()));
+            ui::Root::new(panel.into(), window, cx)
         });
+        let (_editor, panel) = slot.borrow_mut().take().expect("the panel was created");
         let view = panel.read_with(cx, |panel, _| panel.view.clone());
         cx.update(|window, app| {
             let handle = view.focus_handle(app);
@@ -950,12 +958,47 @@ mod tests {
             })
         };
 
+        // The test platform delivers a typed character to a text input twice
+        // (key down and simulated IME) and turns Enter into a newline, which
+        // the desktop platforms do not. So the bars' fields are filled, and
+        // their Enter raised, as the input does; the shortcuts go through
+        // the keys.
+        let bar_input = |cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| match &panel.bar {
+                Some(Bar::Find(find)) => find.query.clone(),
+                Some(Bar::GoToLine { input, .. }) => input.clone(),
+                Some(Bar::Locations { filter, .. }) => filter.clone(),
+                None => panic!("no bar is open"),
+            })
+        };
+        let type_into_bar = |cx: &mut VisualTestContext, text: &str| {
+            let input = bar_input(cx);
+            let text = text.to_owned();
+            cx.update(|window, app| {
+                input.update(app, |input, cx| input.set_value(text, window, cx));
+            });
+            cx.run_until_parked();
+        };
+        let press_enter = |cx: &mut VisualTestContext| {
+            let input = bar_input(cx);
+            cx.update(|_, app| {
+                input.update(app, |_, cx| {
+                    cx.emit(InputEvent::PressEnter { secondary: false })
+                });
+            });
+            cx.run_until_parked();
+        };
+
         cx.simulate_keystrokes("ctrl-f");
-        cx.simulate_input("a(");
+        type_into_bar(cx, "a(");
         cx.run_until_parked();
         assert!(panel.read_with(cx, |panel, _| matches!(panel.bar, Some(Bar::Find(_)))));
         assert_eq!(status(cx), Some((Some(0), 3)));
-        cx.simulate_keystrokes("enter");
+        press_enter(cx);
+        assert_eq!(status(cx), Some((Some(1), 3)));
+        cx.simulate_keystrokes("f3");
+        assert_eq!(status(cx), Some((Some(2), 3)));
+        cx.simulate_keystrokes("shift-f3");
         assert_eq!(status(cx), Some((Some(1), 3)));
         cx.simulate_keystrokes("shift-f3");
         assert_eq!(status(cx), Some((Some(0), 3)));
@@ -966,8 +1009,8 @@ mod tests {
         assert_eq!(status(cx), None, "closing the bar clears the highlights");
 
         cx.simulate_keystrokes("ctrl-g");
-        cx.simulate_input("2:4");
-        cx.simulate_keystrokes("enter");
+        type_into_bar(cx, "2:4");
+        press_enter(cx);
         cx.run_until_parked();
         assert!(panel.read_with(cx, |panel, _| panel.bar.is_none()));
         assert_eq!(caret(cx), vec![10 + 3], "line 2, column 4");
@@ -983,6 +1026,7 @@ mod tests {
         // Without a language server the Go menu's lists say so, and do not hang.
         cx.simulate_keystrokes("ctrl-shift-o");
         cx.run_until_parked();
+
         let note = panel.read_with(cx, |panel, cx| {
             panel
                 .text_editor
