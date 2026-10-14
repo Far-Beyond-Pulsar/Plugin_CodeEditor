@@ -38,12 +38,20 @@ actions!(
         EditorFindNext,
         EditorFindPrevious,
         EditorFormatDocument,
+        /// Formats the selected lines (the whole document without a
+        /// selection).
+        EditorFormatSelection,
         EditorAddCursorAbove,
         EditorAddCursorBelow,
+        /// Ctrl+D: selects the word under the caret, then adds the next
+        /// occurrence of the selection.
+        EditorAddNextOccurrence,
         EditorGoToLine,
         EditorGoToDefinition,
         EditorGoToReferences,
         EditorGoToSymbol,
+        /// Searches the symbols of the whole workspace by name.
+        EditorGoToWorkspaceSymbol,
         EditorGoToParentModule,
         EditorExpandMacro,
         EditorOpenCargoToml,
@@ -51,6 +59,11 @@ actions!(
         EditorGenerateStressFile,
         /// Closes the find, go-to-line or location bar.
         EditorCloseBar,
+        /// The find bar's Match Case, Match Whole Word and Use Regular
+        /// Expression switches.
+        EditorToggleFindCase,
+        EditorToggleFindWholeWord,
+        EditorToggleFindRegex,
     ]
 );
 
@@ -106,6 +119,9 @@ pub struct TextEditor {
     /// What Go to References or Go to Symbol found, shown by the panel of
     /// the file it was asked from.
     locations: Option<LocationList>,
+    /// Counts location requests, so only the latest one's answer is shown
+    /// (workspace symbols ask again on every keystroke).
+    locations_request: u64,
 }
 
 impl TextEditor {
@@ -130,6 +146,7 @@ impl TextEditor {
             generating: false,
             lsp: None,
             locations: None,
+            locations_request: 0,
         };
         // The language server arrives through the plugin API's context.
         if let Some(analyzer) = settings.services().language_server.clone() {

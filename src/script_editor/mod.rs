@@ -725,20 +725,23 @@ impl ScriptEditor {
                     .action_if("Find Next", EditorFindNext, open)
                     .action_if("Find Previous", EditorFindPrevious, open)
                     .separator()
-                    .action_if("Format Document", EditorFormatDocument, open),
+                    .action_if("Format Document", EditorFormatDocument, open)
+                    .action_if("Format Selection", EditorFormatSelection, open),
             )
             .menu(
                 EditorMenu::new("Selection")
                     .action_if("Select All", EditorSelectAll, open)
                     .separator()
                     .action_if("Add Cursor Above", EditorAddCursorAbove, open)
-                    .action_if("Add Cursor Below", EditorAddCursorBelow, open),
+                    .action_if("Add Cursor Below", EditorAddCursorBelow, open)
+                    .action_if("Add Next Occurrence", EditorAddNextOccurrence, open),
             )
             .menu(EditorMenu::new("View").action_if("Unfold All", EditorUnfoldAll, open))
             .menu(
                 EditorMenu::new("Go")
                     .action_if("Go to Line…", EditorGoToLine, open)
                     .action_if("Go to Symbol in File…", EditorGoToSymbol, open)
+                    .action_if("Go to Symbol in Workspace…", EditorGoToWorkspaceSymbol, open)
                     .separator()
                     .action_if("Go to Definition", EditorGoToDefinition, open)
                     .action_if("Go to References", EditorGoToReferences, open)
