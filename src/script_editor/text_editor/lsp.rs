@@ -700,14 +700,17 @@ impl TextEditor {
         };
         self.show_locations(path, title, Ok(None), cx);
         let origin = path.to_path_buf();
+        let request = self.locations_request;
         cx.spawn(async move |this, cx| {
             let Ok(response) = response.recv_async().await else {
                 return;
             };
             let _ = this.update(cx, |this, cx| {
-                let still_asked = this.locations.as_ref().is_some_and(|list| {
-                    list.origin == origin && list.title == title && list.items.is_none()
-                });
+                // Only the latest request's answer, while its list is shown.
+                let still_asked = this.locations_request == request
+                    && this.locations.as_ref().is_some_and(|list| {
+                        list.origin == origin && list.title == title && list.items.is_none()
+                    });
                 if !still_asked {
                     return;
                 }
@@ -731,6 +734,9 @@ impl TextEditor {
             Ok(items) => (items, None),
             Err(reason) => (Some(Vec::new()), Some(reason.into())),
         };
+        if items.is_none() {
+            self.locations_request += 1;
+        }
         self.locations = Some(LocationList {
             origin: path.to_path_buf(),
             title: title.into(),
@@ -783,6 +789,38 @@ impl TextEditor {
     /// Formats `path` with the language server, as one edit. An answer for a
     /// document that changed meanwhile is dropped.
     pub fn format_document(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        self.format_lines(path, None, cx);
+    }
+
+    /// Formats the lines the selection of `path` touches (the whole
+    /// document without a selection). rust-analyzer only does range
+    /// formatting with a nightly rustfmt, so this asks for the whole
+    /// document and applies the edits that fall within those lines: the
+    /// rest of the file is left as it is.
+    pub fn format_selection(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Ok((_, _, view, _)) = self.lsp_target_for(path, cx) else {
+            return;
+        };
+        let lines = view.read(cx).surface.editor().selections().primary().and_then(|selection| {
+            let range = selection.ordered_range();
+            if range.is_empty() {
+                return None;
+            }
+            let text = view.read(cx).surface.document().text().clone();
+            let first = text.byte_to_line(range.start).ok()?;
+            // A selection ending at a line's start does not take that line.
+            let last = text.byte_to_line(range.end.saturating_sub(1).max(range.start)).ok()?;
+            Some(first..=last)
+        });
+        self.format_lines(path, lines, cx);
+    }
+
+    fn format_lines(
+        &mut self,
+        path: &std::path::Path,
+        lines: Option<std::ops::RangeInclusive<usize>>,
+        cx: &mut Context<Self>,
+    ) {
         let Ok((_, analyzer, view, uri)) = self.lsp_target_for(path, cx) else {
             return;
         };
@@ -801,7 +839,10 @@ impl TextEditor {
             let Ok(response) = response.recv_async().await else {
                 return;
             };
-            let edits = position_edits(response.get("result").unwrap_or(&Value::Null));
+            let mut edits = position_edits(response.get("result").unwrap_or(&Value::Null));
+            if let Some(lines) = &lines {
+                edits.retain(|edit| edit_within_lines(edit, lines));
+            }
             let _ = view.update(cx, |view, cx| {
                 if view.document_version() == version {
                     view.apply_position_edits(edits, cx);
@@ -809,6 +850,39 @@ impl TextEditor {
             });
         })
         .detach();
+    }
+
+    /// Lists the symbols of the whole workspace whose names match `query`
+    /// (the server's own matching, which is fuzzy). Each call replaces the
+    /// previous one's answer; an empty query lists nothing.
+    pub fn workspace_symbols(
+        &mut self,
+        path: &std::path::Path,
+        query: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let title = "Workspace Symbols";
+        let analyzer = match self.lsp_target_for(path, cx) {
+            Ok((_, analyzer, _, _)) => analyzer,
+            Err(reason) => return self.show_locations(path, title, Err(reason), cx),
+        };
+        if query.trim().is_empty() {
+            return self.show_locations(
+                path,
+                title,
+                Err("Type a name to search the workspace"),
+                cx,
+            );
+        }
+        self.request_locations(
+            path,
+            title,
+            analyzer,
+            "workspace/symbol",
+            json!({ "query": query.trim() }),
+            cx,
+            |result, _| workspace_symbols(result),
+        );
     }
 
     /// Opens the module that declares the one `path`'s caret is in.
@@ -1140,6 +1214,53 @@ fn document_symbols(result: &Value, path: &std::path::Path) -> Vec<LocationItem>
     out
 }
 
+/// Whether `edit` lies within `lines` (an edit ending at the start of the
+/// next line, as one replacing a line's end does, counts as within).
+fn edit_within_lines(edit: &PositionEdit, lines: &std::ops::RangeInclusive<usize>) -> bool {
+    let last = *lines.end();
+    let end_inside = edit.end.line <= last || (edit.end.line == last + 1 && edit.end.column == 0);
+    edit.start.line >= *lines.start() && end_inside
+}
+
+/// The symbols of a `workspace/symbol` answer (`SymbolInformation[]` or
+/// `WorkspaceSymbol[]`, whose location may name only the file), labelled by
+/// name, with kind, container and file as detail.
+fn workspace_symbols(result: &Value) -> Vec<LocationItem> {
+    result
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|symbol| {
+            let name = symbol.get("name")?.as_str()?;
+            let location = symbol.get("location")?;
+            let path = uri_to_path(location.get("uri")?.as_str()?);
+            let start = location
+                .get("range")
+                .and_then(|range| range.get("start"))
+                .and_then(position_from)
+                .unwrap_or(TextPosition { line: 0, column: 0 });
+            let kind = symbol_kind_name(symbol.get("kind").and_then(Value::as_u64).unwrap_or(0));
+            let file = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let detail = match symbol.get("containerName").and_then(Value::as_str) {
+                Some(container) if !container.is_empty() => {
+                    format!("{kind} · {container} · {file}:{}", start.line + 1)
+                }
+                _ => format!("{kind} · {file}:{}", start.line + 1),
+            };
+            Some(LocationItem {
+                path,
+                line: start.line as u32,
+                character: start.column as u32,
+                label: name.to_owned(),
+                detail,
+            })
+        })
+        .collect()
+}
+
 /// LSP's `SymbolKind` by name.
 fn symbol_kind_name(kind: u64) -> &'static str {
     const NAMES: [&str; 26] = [
@@ -1349,6 +1470,42 @@ mod tests {
         assert_eq!(entries[1].host_data, 2);
         assert_eq!(entries[1].insert_text, "len");
         assert!(parse_completions(json!({ "result": null })).is_none());
+    }
+
+    #[test]
+    fn workspace_symbols_take_both_answer_shapes() {
+        let result = json!([
+            {
+                "name": "Player", "kind": 23, "containerName": "game",
+                "location": { "uri": "file:///p/src/player.rs",
+                    "range": { "start": { "line": 4, "character": 11 }, "end": { "line": 4, "character": 17 } } }
+            },
+            { "name": "spawn", "kind": 12, "location": { "uri": "file:///p/src/lib.rs" } },
+            { "kind": 12, "location": { "uri": "file:///p/src/lib.rs" } }
+        ]);
+        let items = workspace_symbols(&result);
+        assert_eq!(items.len(), 2, "a symbol without a name is skipped");
+        assert_eq!(items[0].label, "Player");
+        assert_eq!((items[0].line, items[0].character), (4, 11));
+        assert_eq!(items[0].detail, "struct · game · player.rs:5");
+        assert_eq!(items[1].label, "spawn");
+        assert_eq!(items[1].line, 0, "a WorkspaceSymbol may name only its file");
+        assert_eq!(items[1].detail, "function · lib.rs:1");
+    }
+
+    #[test]
+    fn format_selection_keeps_the_edits_within_its_lines() {
+        let edit = |start: (usize, usize), end: (usize, usize)| PositionEdit {
+            start: TextPosition { line: start.0, column: start.1 },
+            end: TextPosition { line: end.0, column: end.1 },
+            new_text: String::new(),
+        };
+        let lines = 3..=5;
+        assert!(edit_within_lines(&edit((3, 0), (3, 4)), &lines));
+        assert!(edit_within_lines(&edit((5, 2), (6, 0)), &lines), "the last line's end");
+        assert!(!edit_within_lines(&edit((2, 9), (3, 0)), &lines), "starts above");
+        assert!(!edit_within_lines(&edit((5, 0), (6, 1)), &lines), "reaches below");
+        assert!(!edit_within_lines(&edit((7, 0), (7, 1)), &lines));
     }
 
     #[test]

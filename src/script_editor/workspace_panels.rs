@@ -2,15 +2,18 @@
 
 use super::file_explorer::FileExplorer;
 use super::text_editor::{
-    EditorAddCursorAbove, EditorAddCursorBelow, EditorCloseBar, EditorCopy, EditorCopyPath,
-    EditorCut, EditorExpandMacro, EditorFind, EditorFindNext, EditorFindPrevious,
-    EditorFormatDocument, EditorGenerateStressFile, EditorGoToDefinition, EditorGoToLine,
-    EditorGoToParentModule, EditorGoToReferences, EditorGoToSymbol, EditorOpenCargoToml,
-    EditorPaste, EditorRedo, EditorReloadWorkspace, EditorReplace, EditorSave, EditorSelectAll,
-    EditorUndo, EditorUnfoldAll, LocationItem, TextEditor,
+    EditorAddCursorAbove, EditorAddCursorBelow, EditorAddNextOccurrence, EditorCloseBar,
+    EditorCopy, EditorCopyPath, EditorCut, EditorExpandMacro, EditorFind, EditorFindNext,
+    EditorFindPrevious, EditorFormatDocument, EditorFormatSelection, EditorGenerateStressFile,
+    EditorGoToDefinition, EditorGoToLine, EditorGoToParentModule, EditorGoToReferences,
+    EditorGoToSymbol, EditorGoToWorkspaceSymbol, EditorOpenCargoToml, EditorPaste, EditorRedo,
+    EditorReloadWorkspace, EditorReplace, EditorSave, EditorSelectAll, EditorToggleFindCase,
+    EditorToggleFindRegex, EditorToggleFindWholeWord, EditorUndo, EditorUnfoldAll, LocationItem,
+    TextEditor,
 };
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
+use mockaco_core::{CaseSensitivity, SearchQuery};
 use mockaco_gpui::native::WgpuiEditorView;
 use rust_i18n::t;
 use std::path::PathBuf;
@@ -40,7 +43,13 @@ pub(crate) fn bind_editor_keys(cx: &mut App) {
         KeyBinding::new("shift-f12", EditorGoToReferences, context),
         KeyBinding::new("ctrl-shift-o", EditorGoToSymbol, context),
         KeyBinding::new("shift-alt-f", EditorFormatDocument, context),
+        KeyBinding::new("ctrl-k ctrl-f", EditorFormatSelection, context),
+        KeyBinding::new("ctrl-d", EditorAddNextOccurrence, context),
+        KeyBinding::new("ctrl-t", EditorGoToWorkspaceSymbol, context),
         KeyBinding::new("escape", EditorCloseBar, Some(BAR_CONTEXT)),
+        KeyBinding::new("alt-c", EditorToggleFindCase, Some(BAR_CONTEXT)),
+        KeyBinding::new("alt-w", EditorToggleFindWholeWord, Some(BAR_CONTEXT)),
+        KeyBinding::new("alt-r", EditorToggleFindRegex, Some(BAR_CONTEXT)),
     ]);
 }
 
@@ -52,9 +61,11 @@ enum Bar {
         _subscription: Subscription,
     },
     /// Go to References / Symbol: the list lives in [`TextEditor`], this
-    /// filters it.
+    /// filters it. For workspace symbols the server does the matching, so
+    /// the field's text is sent as the query instead.
     Locations {
         filter: Entity<InputState>,
+        workspace: bool,
         _subscription: Subscription,
     },
 }
@@ -64,7 +75,22 @@ struct FindBar {
     /// Shown for Replace.
     replacement: Option<Entity<InputState>>,
     case_sensitive: bool,
+    whole_word: bool,
+    regex: bool,
     _subscriptions: Vec<Subscription>,
+}
+
+impl FindBar {
+    fn search_query(&self, cx: &App) -> SearchQuery {
+        SearchQuery::new(self.query.read(cx).value().to_string())
+            .case_sensitivity(if self.case_sensitive {
+                CaseSensitivity::Sensitive
+            } else {
+                CaseSensitivity::Insensitive
+            })
+            .whole_word(self.whole_word)
+            .regex(self.regex)
+    }
 }
 
 /// One open document as a dock tab. The document itself (text, language
@@ -199,6 +225,8 @@ impl FilePanel {
             query,
             replacement,
             case_sensitive: false,
+            whole_word: false,
+            regex: false,
             _subscriptions: subscriptions,
         }));
         self.search(cx);
@@ -243,19 +271,16 @@ impl FilePanel {
         (!text.contains('\n')).then_some(text)
     }
 
-    fn find_query(&self, cx: &App) -> Option<(String, bool)> {
+    fn find_query(&self, cx: &App) -> Option<SearchQuery> {
         match &self.bar {
-            Some(Bar::Find(find)) => {
-                Some((find.query.read(cx).value().to_string(), find.case_sensitive))
-            }
+            Some(Bar::Find(find)) => Some(find.search_query(cx)),
             _ => None,
         }
     }
 
     fn search(&mut self, cx: &mut Context<Self>) {
-        if let Some((pattern, case_sensitive)) = self.find_query(cx) {
-            self.view
-                .update(cx, |view, cx| view.find(&pattern, case_sensitive, cx));
+        if let Some(query) = self.find_query(cx) {
+            self.view.update(cx, |view, cx| view.find_query(query, cx));
             cx.notify();
         }
     }
@@ -297,11 +322,13 @@ impl FilePanel {
         }
     }
 
-    fn toggle_case(&mut self, cx: &mut Context<Self>) {
+    /// Flips one of the find bar's switches and searches again.
+    fn toggle_find(&mut self, switch: fn(&mut FindBar) -> &mut bool, cx: &mut Context<Self>) {
         if let Some(Bar::Find(find)) = &mut self.bar {
-            find.case_sensitive = !find.case_sensitive;
+            let value = switch(find);
+            *value = !*value;
+            self.search(cx);
         }
-        self.search(cx);
     }
 
     /// Closes whichever bar is open and returns to the text.
@@ -356,16 +383,47 @@ impl FilePanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_location_bar(false, None, window, cx);
+        self.with_editor(cx, |editor, path, cx| request(editor, path, cx));
+        cx.notify();
+    }
+
+    /// Searches the workspace's symbols, starting from the selected text.
+    fn open_workspace_symbols(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let seed = self.selected_text(cx).unwrap_or_default();
+        self.open_location_bar(true, Some(seed.clone()), window, cx);
+        self.with_editor(cx, |editor, path, cx| editor.workspace_symbols(path, &seed, cx));
+        cx.notify();
+    }
+
+    fn open_location_bar(
+        &mut self,
+        workspace: bool,
+        seed: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.close_other_bar(cx);
         let filter = cx.new(|cx| {
-            let input = InputState::new(window, cx).placeholder("Filter");
+            let placeholder = if workspace { "Symbol name" } else { "Filter" };
+            let mut input = InputState::new(window, cx).placeholder(placeholder);
+            if let Some(seed) = seed {
+                input.set_value(seed, window, cx);
+            }
             input.focus(window, cx);
             input
         });
         let subscription = cx.subscribe_in(
             &filter,
             window,
-            |this: &mut Self, _, event: &InputEvent, window, cx| match event {
+            move |this: &mut Self, input, event: &InputEvent, window, cx| match event {
+                InputEvent::Change if workspace => {
+                    let query = input.read(cx).value().to_string();
+                    this.with_editor(cx, |editor, path, cx| {
+                        editor.workspace_symbols(path, &query, cx)
+                    });
+                    cx.notify();
+                }
                 InputEvent::Change => cx.notify(),
                 InputEvent::PressEnter { .. } => {
                     if let Some(item) = this.filtered_locations(cx).into_iter().next() {
@@ -377,10 +435,9 @@ impl FilePanel {
         );
         self.bar = Some(Bar::Locations {
             filter,
+            workspace,
             _subscription: subscription,
         });
-        self.with_editor(cx, |editor, path, cx| request(editor, path, cx));
-        cx.notify();
     }
 
     /// Clears what the bar being replaced left behind.
@@ -396,10 +453,18 @@ impl FilePanel {
 
     /// The listed places matching the filter, when this panel asked for them.
     fn filtered_locations(&self, cx: &App) -> Vec<LocationItem> {
-        let Some(Bar::Locations { filter, .. }) = &self.bar else {
+        let Some(Bar::Locations {
+            filter, workspace, ..
+        }) = &self.bar
+        else {
             return Vec::new();
         };
-        let filter = filter.read(cx).value().to_lowercase();
+        // The server already matched workspace symbols, fuzzily.
+        let filter = if *workspace {
+            String::new()
+        } else {
+            filter.read(cx).value().to_lowercase()
+        };
         let Some(editor) = self.text_editor.upgrade() else {
             return Vec::new();
         };
@@ -441,7 +506,9 @@ impl FilePanel {
         let muted = theme.muted_foreground;
         let element = match bar {
             Bar::Find(find) => {
+                let invalid = find.search_query(cx).error().is_some();
                 let status = match self.view.read(cx).find_status() {
+                    _ if invalid => "Invalid expression".to_owned(),
                     Some((_, 0)) => "No results".to_owned(),
                     Some((Some(current), total)) => format!("{} of {total}", current + 1),
                     Some((None, total)) => format!("{total} found"),
@@ -457,8 +524,32 @@ impl FilePanel {
                             .ghost()
                             .xsmall()
                             .selected(find.case_sensitive)
-                            .tooltip("Match Case")
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_case(cx))),
+                            .tooltip("Match Case (Alt+C)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_find(|find| &mut find.case_sensitive, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("find-whole-word")
+                            .label("ab")
+                            .ghost()
+                            .xsmall()
+                            .selected(find.whole_word)
+                            .tooltip("Match Whole Word (Alt+W)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_find(|find| &mut find.whole_word, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("find-regex")
+                            .label(".*")
+                            .ghost()
+                            .xsmall()
+                            .selected(find.regex)
+                            .tooltip("Use Regular Expression (Alt+R)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_find(|find| &mut find.regex, cx)
+                            })),
                     )
                     .child(
                         div()
@@ -684,6 +775,21 @@ impl Render for FilePanel {
             .on_action(cx.listener(|this, _: &EditorFormatDocument, _, cx| {
                 this.with_editor(cx, |editor, path, cx| editor.format_document(path, cx))
             }))
+            .on_action(cx.listener(|this, _: &EditorFormatSelection, _, cx| {
+                this.with_editor(cx, |editor, path, cx| editor.format_selection(path, cx))
+            }))
+            .on_action(cx.listener(|this, _: &EditorAddNextOccurrence, _, cx| {
+                this.view.update(cx, |view, cx| view.add_next_occurrence(cx));
+            }))
+            .on_action(cx.listener(|this, _: &EditorToggleFindCase, _, cx| {
+                this.toggle_find(|find| &mut find.case_sensitive, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorToggleFindWholeWord, _, cx| {
+                this.toggle_find(|find| &mut find.whole_word, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorToggleFindRegex, _, cx| {
+                this.toggle_find(|find| &mut find.regex, cx)
+            }))
             .on_action(cx.listener(|this, _: &EditorAddCursorAbove, _, cx| {
                 this.view.update(cx, |view, cx| view.add_cursor(true, cx))
             }))
@@ -703,6 +809,9 @@ impl Render for FilePanel {
             }))
             .on_action(cx.listener(|this, _: &EditorGoToSymbol, window, cx| {
                 this.open_locations(TextEditor::document_symbols, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorGoToWorkspaceSymbol, window, cx| {
+                this.open_workspace_symbols(window, cx)
             }))
             .on_action(cx.listener(|this, _: &EditorGoToParentModule, _, cx| {
                 this.with_editor(cx, |editor, path, cx| editor.go_to_parent_module(path, cx))
@@ -736,6 +845,7 @@ impl Render for FilePanel {
                     .menu("Go to Definition", Box::new(EditorGoToDefinition))
                     .menu("Go to References", Box::new(EditorGoToReferences))
                     .menu("Format Document", Box::new(EditorFormatDocument))
+                    .menu("Format Selection", Box::new(EditorFormatSelection))
                     .separator()
                     .menu("Select All", Box::new(EditorSelectAll))
                     .menu("Unfold All", Box::new(EditorUnfoldAll))
@@ -911,8 +1021,10 @@ mod tests {
     }
 
     /// The menus' commands as the keys reach them: Ctrl+F finds and Enter
-    /// steps, Escape closes the bar, Ctrl+G moves the caret, and Add Cursor
-    /// adds one.
+    /// steps, Alt+W and Alt+R switch to whole words and regular
+    /// expressions, Escape closes the bar, Ctrl+D selects occurrences,
+    /// Ctrl+G moves the caret, Add Cursor adds one, and the symbol lists
+    /// open.
     #[gpui::test]
     fn find_go_to_line_and_add_cursor_through_the_panel(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -1003,10 +1115,50 @@ mod tests {
         cx.simulate_keystrokes("shift-f3");
         assert_eq!(status(cx), Some((Some(0), 3)));
 
+        // The switches, by their keys while the field has focus: whole
+        // word, then a regular expression, and an invalid one.
+        let switches = |cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| match &panel.bar {
+                Some(Bar::Find(find)) => (find.case_sensitive, find.whole_word, find.regex),
+                _ => panic!("the find bar is open"),
+            })
+        };
+        type_into_bar(cx, "a");
+        assert_eq!(status(cx).map(|(_, total)| total), Some(3));
+        cx.simulate_keystrokes("alt-w");
+        assert_eq!(switches(cx), (false, true, false));
+        assert_eq!(status(cx).map(|(_, total)| total), Some(3), "a is a word each time");
+        cx.simulate_keystrokes("alt-w alt-r");
+        assert_eq!(switches(cx), (false, false, true));
+        type_into_bar(cx, r"\w\(\)");
+        assert_eq!(status(cx).map(|(_, total)| total), Some(4), "a(), b(), a(), a()");
+        type_into_bar(cx, "(");
+        assert_eq!(status(cx).map(|(_, total)| total), Some(0));
+        let invalid = panel.read_with(cx, |panel, cx| match &panel.bar {
+            Some(Bar::Find(find)) => find.search_query(cx).error().is_some(),
+            _ => false,
+        });
+        assert!(invalid, "the bar says the expression is invalid");
+
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert!(panel.read_with(cx, |panel, _| panel.bar.is_none()));
         assert_eq!(status(cx), None, "closing the bar clears the highlights");
+
+        // Ctrl+D: the word under the caret, then its next occurrence.
+        view.update(cx, |view, cx| view.go_to(1, 9, cx));
+        cx.simulate_keystrokes("ctrl-d ctrl-d");
+        cx.run_until_parked();
+        let selected = view.read_with(cx, |view, _| {
+            view.surface
+                .editor()
+                .selections()
+                .selections()
+                .iter()
+                .map(|selection| selection.ordered_range())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(selected, vec![19..20, 24..25], "both calls to a");
 
         cx.simulate_keystrokes("ctrl-g");
         type_into_bar(cx, "2:4");
@@ -1035,6 +1187,28 @@ mod tests {
                 .and_then(|list| list.message)
         });
         assert!(note.is_some());
+
+        // Go to Symbol in Workspace opens a list the server fills as you
+        // type; without a server it says so.
+        cx.simulate_keystrokes("escape ctrl-t");
+        cx.run_until_parked();
+        assert!(panel.read_with(cx, |panel, _| matches!(
+            panel.bar,
+            Some(Bar::Locations {
+                workspace: true,
+                ..
+            })
+        )));
+        type_into_bar(cx, "fn");
+        let list = panel.read_with(cx, |panel, cx| {
+            panel
+                .text_editor
+                .upgrade()
+                .and_then(|editor| editor.read(cx).locations().cloned())
+        });
+        let list = list.expect("a list for the panel");
+        assert_eq!(list.title.as_ref(), "Workspace Symbols");
+        assert!(list.message.is_some());
         let _ = std::fs::remove_file(&path);
     }
 }
