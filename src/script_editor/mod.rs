@@ -91,6 +91,7 @@ impl ScriptEditor {
         cx: &mut Context<Self>,
         settings: plugin_editor_api::EditorSettingsSnapshot,
     ) -> Self {
+        workspace_panels::bind_editor_keys(cx);
         cx.bind_keys([
             KeyBinding::new("ctrl-s", SaveCurrentFile, Some("ScriptEditor")),
             KeyBinding::new("ctrl-w", CloseCurrentFile, Some("ScriptEditor")),
@@ -701,33 +702,59 @@ impl ScriptEditor {
     /// the open file's view, whose panel handles them as it does for the
     /// context menu and the keys.
     fn render_menus(view_focus: Option<FocusHandle>) -> impl IntoElement {
-        use text_editor::{
-            EditorCopy, EditorCopyPath, EditorCut, EditorPaste, EditorRedo, EditorSave,
-            EditorSelectAll, EditorUndo, EditorUnfoldAll,
-        };
+        use plugin_editor_api::EditorMenu;
+        use text_editor::*;
         let open = view_focus.is_some();
         let strip = plugin_editor_api::EditorMenuStrip::new("script-editor-menus")
             .menu(
-                plugin_editor_api::EditorMenu::new("File")
+                EditorMenu::new("File")
                     .action_if("Save", EditorSave, open)
                     .action_if("Copy File Path", EditorCopyPath, open),
             )
             .menu(
-                plugin_editor_api::EditorMenu::new("Edit")
+                EditorMenu::new("Edit")
                     .action_if("Undo", EditorUndo, open)
                     .action_if("Redo", EditorRedo, open)
                     .separator()
                     .action_if("Cut", EditorCut, open)
                     .action_if("Copy", EditorCopy, open)
-                    .action_if("Paste", EditorPaste, open),
+                    .action_if("Paste", EditorPaste, open)
+                    .separator()
+                    .action_if("Find", EditorFind, open)
+                    .action_if("Replace", EditorReplace, open)
+                    .action_if("Find Next", EditorFindNext, open)
+                    .action_if("Find Previous", EditorFindPrevious, open)
+                    .separator()
+                    .action_if("Format Document", EditorFormatDocument, open),
             )
             .menu(
-                plugin_editor_api::EditorMenu::new("Selection")
-                    .action_if("Select All", EditorSelectAll, open),
+                EditorMenu::new("Selection")
+                    .action_if("Select All", EditorSelectAll, open)
+                    .separator()
+                    .action_if("Add Cursor Above", EditorAddCursorAbove, open)
+                    .action_if("Add Cursor Below", EditorAddCursorBelow, open),
+            )
+            .menu(EditorMenu::new("View").action_if("Unfold All", EditorUnfoldAll, open))
+            .menu(
+                EditorMenu::new("Go")
+                    .action_if("Go to Line…", EditorGoToLine, open)
+                    .action_if("Go to Symbol in File…", EditorGoToSymbol, open)
+                    .separator()
+                    .action_if("Go to Definition", EditorGoToDefinition, open)
+                    .action_if("Go to References", EditorGoToReferences, open)
+                    .action_if("Go to Parent Module", EditorGoToParentModule, open),
             )
             .menu(
-                plugin_editor_api::EditorMenu::new("View")
-                    .action_if("Unfold All", EditorUnfoldAll, open),
+                EditorMenu::new("Tools")
+                    .action_if("Expand Macro", EditorExpandMacro, open)
+                    .action_if("Open Cargo.toml", EditorOpenCargoToml, open)
+                    .action_if("Reload Cargo Workspace", EditorReloadWorkspace, open)
+                    .separator()
+                    .action_if(
+                        "Generate 1M-Line Stress File",
+                        EditorGenerateStressFile,
+                        open,
+                    ),
             );
         match view_focus {
             Some(focus) => strip.action_context(focus),

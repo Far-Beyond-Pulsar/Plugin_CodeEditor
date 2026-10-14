@@ -571,6 +571,378 @@ impl TextEditor {
     }
 }
 
+impl TextEditor {
+    /// The places Go to References or Go to Symbol last found.
+    pub fn locations(&self) -> Option<&LocationList> {
+        self.locations.as_ref()
+    }
+
+    pub fn clear_locations(&mut self, cx: &mut Context<Self>) {
+        if self.locations.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Shows `item`: in this editor when its file is open here, otherwise by
+    /// asking the owning panel to open it.
+    pub fn open_location(&mut self, item: &LocationItem, cx: &mut Context<Self>) {
+        self.navigate_to(item.path.clone(), item.line, item.character, cx);
+    }
+
+    /// The index of `path` and the request target, or a reason there is none.
+    fn lsp_target_for(
+        &self,
+        path: &std::path::Path,
+        cx: &Context<Self>,
+    ) -> Result<
+        (
+            usize,
+            Entity<RustAnalyzerManager>,
+            Entity<WgpuiEditorView>,
+            String,
+        ),
+        &'static str,
+    > {
+        let index = self
+            .open_files
+            .iter()
+            .position(|file| file.path == path)
+            .ok_or("The file is not open")?;
+        if self.lsp.is_none() || !is_rust(&self.open_files[index].path) {
+            return Err("No language server for this file");
+        }
+        let (analyzer, view, uri) = self
+            .lsp_target(index, cx)
+            .ok_or("The language server is not ready")?;
+        Ok((index, analyzer, view, uri))
+    }
+
+    /// Asks the server for the definition under the caret of `path`.
+    pub fn go_to_definition(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        if let Ok((_, _, view, _)) = self.lsp_target_for(path, cx) {
+            view.update(cx, |view, cx| view.request_definition_at_caret(cx));
+        }
+    }
+
+    /// Lists every reference to the symbol under the caret of `path`.
+    pub fn find_references(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let title = "References";
+        let (analyzer, view, uri) = match self.lsp_target_for(path, cx) {
+            Ok((_, analyzer, view, uri)) => (analyzer, view, uri),
+            Err(reason) => return self.show_locations(path, title, Err(reason), cx),
+        };
+        let Some(request) = view.update(cx, |view, _| view.lsp_request_at_caret()) else {
+            return self.show_locations(path, title, Err("No caret"), cx);
+        };
+        let mut params = position_params(&uri, request.position);
+        params["context"] = json!({ "includeDeclaration": true });
+        self.request_locations(
+            path,
+            title,
+            analyzer,
+            "textDocument/references",
+            params,
+            cx,
+            |result, _| {
+                all_locations(result)
+                    .into_iter()
+                    .map(|(uri, line, character)| LocationItem {
+                        path: uri_to_path(&uri),
+                        line,
+                        character,
+                        label: String::new(),
+                        detail: String::new(),
+                    })
+                    .collect()
+            },
+        );
+    }
+
+    /// Lists the symbols declared in `path`, outermost first.
+    pub fn document_symbols(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let title = "Symbols";
+        let (analyzer, uri) = match self.lsp_target_for(path, cx) {
+            Ok((_, analyzer, _, uri)) => (analyzer, uri),
+            Err(reason) => return self.show_locations(path, title, Err(reason), cx),
+        };
+        let params = json!({ "textDocument": { "uri": uri } });
+        self.request_locations(
+            path,
+            title,
+            analyzer,
+            "textDocument/documentSymbol",
+            params,
+            cx,
+            |result, path| document_symbols(result, path),
+        );
+    }
+
+    /// Sends a request whose answer is a list of places, and shows the list
+    /// (empty until the answer arrives) for `path`'s panel.
+    #[allow(clippy::too_many_arguments)]
+    fn request_locations(
+        &mut self,
+        path: &std::path::Path,
+        title: &'static str,
+        analyzer: Entity<RustAnalyzerManager>,
+        method: &str,
+        params: Value,
+        cx: &mut Context<Self>,
+        parse: fn(&Value, &std::path::Path) -> Vec<LocationItem>,
+    ) {
+        let Ok(response) = analyzer.read(cx).send_request_async(method, params) else {
+            return self.show_locations(
+                path,
+                title,
+                Err("The language server did not take the request"),
+                cx,
+            );
+        };
+        self.show_locations(path, title, Ok(None), cx);
+        let origin = path.to_path_buf();
+        cx.spawn(async move |this, cx| {
+            let Ok(response) = response.recv_async().await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                let still_asked = this.locations.as_ref().is_some_and(|list| {
+                    list.origin == origin && list.title == title && list.items.is_none()
+                });
+                if !still_asked {
+                    return;
+                }
+                let result = response.get("result").cloned().unwrap_or(Value::Null);
+                let mut items = parse(&result, &origin);
+                this.fill_previews(&mut items, cx);
+                this.show_locations(&origin, title, Ok(Some(items)), cx);
+            });
+        })
+        .detach();
+    }
+
+    fn show_locations(
+        &mut self,
+        path: &std::path::Path,
+        title: &'static str,
+        items: Result<Option<Vec<LocationItem>>, &'static str>,
+        cx: &mut Context<Self>,
+    ) {
+        let (items, message) = match items {
+            Ok(items) => (items, None),
+            Err(reason) => (Some(Vec::new()), Some(reason.into())),
+        };
+        self.locations = Some(LocationList {
+            origin: path.to_path_buf(),
+            title: title.into(),
+            items,
+            message,
+        });
+        cx.notify();
+    }
+
+    /// Labels each reference with its file and line, and previews the line:
+    /// from the open document when it is open here, else from disk.
+    fn fill_previews(&self, items: &mut [LocationItem], cx: &App) {
+        let mut disk: HashMap<PathBuf, Option<String>> = HashMap::new();
+        for item in items.iter_mut() {
+            if !item.label.is_empty() {
+                continue;
+            }
+            let name = item
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            item.label = format!("{name}:{}", item.line + 1);
+            let key = path_key(&item.path);
+            let open = self
+                .open_files
+                .iter()
+                .find(|file| path_key(&file.path) == key);
+            item.detail = match open {
+                Some(file) => file
+                    .view
+                    .read(cx)
+                    .surface
+                    .document()
+                    .text()
+                    .line(item.line as usize)
+                    .map(|line| line.trim().to_owned())
+                    .unwrap_or_default(),
+                None => disk
+                    .entry(item.path.clone())
+                    .or_insert_with(|| std::fs::read_to_string(&item.path).ok())
+                    .as_deref()
+                    .and_then(|text| text.lines().nth(item.line as usize))
+                    .map(|line| line.trim().to_owned())
+                    .unwrap_or_default(),
+            };
+        }
+    }
+
+    /// Formats `path` with the language server, as one edit. An answer for a
+    /// document that changed meanwhile is dropped.
+    pub fn format_document(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Ok((_, analyzer, view, uri)) = self.lsp_target_for(path, cx) else {
+            return;
+        };
+        let version = view.read(cx).document_version();
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true },
+        });
+        let Ok(response) = analyzer
+            .read(cx)
+            .send_request_async("textDocument/formatting", params)
+        else {
+            return;
+        };
+        cx.spawn(async move |_this, cx| {
+            let Ok(response) = response.recv_async().await else {
+                return;
+            };
+            let edits = position_edits(response.get("result").unwrap_or(&Value::Null));
+            let _ = view.update(cx, |view, cx| {
+                if view.document_version() == version {
+                    view.apply_position_edits(edits, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Opens the module that declares the one `path`'s caret is in.
+    pub fn go_to_parent_module(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Ok((_, analyzer, view, uri)) = self.lsp_target_for(path, cx) else {
+            return;
+        };
+        let Some(request) = view.update(cx, |view, _| view.lsp_request_at_caret()) else {
+            return;
+        };
+        let params = position_params(&uri, request.position);
+        self.navigate_to_answer(analyzer, "experimental/parentModule", params, cx);
+    }
+
+    /// Opens the `Cargo.toml` of the crate `path` belongs to.
+    pub fn open_cargo_toml(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Ok((_, analyzer, _, uri)) = self.lsp_target_for(path, cx) else {
+            return;
+        };
+        let params = json!({ "textDocument": { "uri": uri } });
+        self.navigate_to_answer(analyzer, "rust-analyzer/openCargoToml", params, cx);
+    }
+
+    fn navigate_to_answer(
+        &mut self,
+        analyzer: Entity<RustAnalyzerManager>,
+        method: &str,
+        params: Value,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(response) = analyzer.read(cx).send_request_async(method, params) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let Ok(response) = response.recv_async().await else {
+                return;
+            };
+            let Some((target, line, character)) = response.get("result").and_then(first_location)
+            else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.navigate_to(uri_to_path(&target), line, character, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Expands the macro call under `path`'s caret, recursively, and opens
+    /// the expansion as a scratch file.
+    pub fn expand_macro(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Ok((_, analyzer, view, uri)) = self.lsp_target_for(path, cx) else {
+            return;
+        };
+        let Some(request) = view.update(cx, |view, _| view.lsp_request_at_caret()) else {
+            return;
+        };
+        let params = position_params(&uri, request.position);
+        let Ok(response) = analyzer
+            .read(cx)
+            .send_request_async("rust-analyzer/expandMacro", params)
+        else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let Ok(response) = response.recv_async().await else {
+                return;
+            };
+            let Some((name, expansion)) = response.get("result").and_then(macro_expansion) else {
+                return;
+            };
+            let file = std::env::temp_dir()
+                .join("pulsar_macro_expansions")
+                .join(format!("{}.rs", sanitize_file_name(&name)));
+            let written = file
+                .parent()
+                .map(std::fs::create_dir_all)
+                .unwrap_or(Ok(()))
+                .and_then(|_| {
+                    std::fs::write(&file, format!("// Expansion of {name}!\n{expansion}\n"))
+                });
+            if let Err(error) = written {
+                tracing::warn!("Could not write the expansion of {name}: {error}");
+                return;
+            }
+            let _ = this.update(cx, |this, cx| {
+                // A scratch file shown before is replaced by the new text.
+                if let Some(index) = this.open_files.iter().position(|open| open.path == file) {
+                    let text = format!("// Expansion of {name}!\n{expansion}\n");
+                    this.open_files[index]
+                        .view
+                        .update(cx, |view, cx| view.replace_text(text, cx));
+                }
+                this.navigate_to(file, 0, 0, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Tells the server to reload the project's Cargo workspace.
+    pub fn reload_workspace(&mut self, cx: &mut Context<Self>) {
+        if let Some(analyzer) = self
+            .analyzer()
+            .filter(|analyzer| analyzer.read(cx).is_running())
+        {
+            let _ = analyzer
+                .read(cx)
+                .send_request_async("rust-analyzer/reloadWorkspace", Value::Null);
+        }
+    }
+}
+
+/// What Go to References or Go to Symbol found for one file's panel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocationList {
+    /// The file it was asked from; its panel shows the list.
+    pub origin: PathBuf,
+    pub title: SharedString,
+    /// `None` while the server is answering.
+    pub items: Option<Vec<LocationItem>>,
+    /// Why there is nothing to list, when the request could not be made.
+    pub message: Option<SharedString>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocationItem {
+    pub path: PathBuf,
+    /// Zero-based line and UTF-16 column.
+    pub line: u32,
+    pub character: u32,
+    pub label: String,
+    pub detail: String,
+}
+
 // ---- protocol conversions ---------------------------------------------------
 
 fn position_json(position: TextPosition) -> Value {
@@ -699,6 +1071,135 @@ fn first_location(result: &Value) -> Option<(String, u32, u32)> {
         start.get("line")?.as_u64()? as u32,
         start.get("character")?.as_u64()? as u32,
     ))
+}
+
+/// Every `(uri, line, character)` in a `Location[] | LocationLink[]` result.
+fn all_locations(result: &Value) -> Vec<(String, u32, u32)> {
+    match result {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| first_location(item))
+            .collect(),
+        Value::Object(_) => first_location(result).into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The symbols of a `DocumentSymbol[]` (nested, indented by depth) or
+/// `SymbolInformation[]` result, in document order.
+fn document_symbols(result: &Value, path: &std::path::Path) -> Vec<LocationItem> {
+    fn walk(symbol: &Value, depth: usize, path: &std::path::Path, out: &mut Vec<LocationItem>) {
+        let Some(name) = symbol.get("name").and_then(Value::as_str) else {
+            return;
+        };
+        let range = symbol
+            .get("selectionRange")
+            .or_else(|| {
+                symbol
+                    .get("location")
+                    .and_then(|location| location.get("range"))
+            })
+            .or_else(|| symbol.get("range"));
+        let Some(start) = range
+            .and_then(|range| range.get("start"))
+            .and_then(position_from)
+        else {
+            return;
+        };
+        let target = symbol
+            .get("location")
+            .and_then(|location| location.get("uri"))
+            .and_then(Value::as_str)
+            .map(uri_to_path)
+            .unwrap_or_else(|| path.to_path_buf());
+        let kind = symbol_kind_name(symbol.get("kind").and_then(Value::as_u64).unwrap_or(0));
+        let detail = match symbol.get("detail").and_then(Value::as_str) {
+            Some(detail) if !detail.is_empty() => format!("{kind} · {detail}"),
+            _ => kind.to_owned(),
+        };
+        out.push(LocationItem {
+            path: target,
+            line: start.line as u32,
+            character: start.column as u32,
+            label: format!("{}{name}", "  ".repeat(depth)),
+            detail,
+        });
+        for child in symbol
+            .get("children")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            walk(child, depth + 1, path, out);
+        }
+    }
+    let mut out = Vec::new();
+    for symbol in result.as_array().into_iter().flatten() {
+        walk(symbol, 0, path, &mut out);
+    }
+    out
+}
+
+/// LSP's `SymbolKind` by name.
+fn symbol_kind_name(kind: u64) -> &'static str {
+    const NAMES: [&str; 26] = [
+        "file",
+        "module",
+        "namespace",
+        "package",
+        "class",
+        "method",
+        "property",
+        "field",
+        "constructor",
+        "enum",
+        "interface",
+        "function",
+        "variable",
+        "constant",
+        "string",
+        "number",
+        "boolean",
+        "array",
+        "object",
+        "key",
+        "null",
+        "enum member",
+        "struct",
+        "event",
+        "operator",
+        "type parameter",
+    ];
+    kind.checked_sub(1)
+        .and_then(|index| NAMES.get(index as usize))
+        .copied()
+        .unwrap_or("symbol")
+}
+
+/// The macro name and expansion of a `rust-analyzer/expandMacro` result.
+fn macro_expansion(result: &Value) -> Option<(String, String)> {
+    Some((
+        result.get("name")?.as_str()?.to_owned(),
+        result.get("expansion")?.as_str()?.to_owned(),
+    ))
+}
+
+fn sanitize_file_name(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        "macro".into()
+    } else {
+        name
+    }
 }
 
 /// The items of a completion response and the menu entries built from them.
@@ -848,6 +1349,61 @@ mod tests {
         assert_eq!(entries[1].host_data, 2);
         assert_eq!(entries[1].insert_text, "len");
         assert!(parse_completions(json!({ "result": null })).is_none());
+    }
+
+    #[test]
+    fn reference_results_list_every_location() {
+        let result = json!([
+            { "uri": "file:///a.rs", "range": { "start": { "line": 1, "character": 2 }, "end": {} } },
+            { "uri": "file:///b.rs", "range": { "start": { "line": 7, "character": 0 }, "end": {} } },
+        ]);
+        assert_eq!(
+            all_locations(&result),
+            vec![("file:///a.rs".into(), 1, 2), ("file:///b.rs".into(), 7, 0)]
+        );
+        assert!(all_locations(&Value::Null).is_empty());
+    }
+
+    #[test]
+    fn document_symbols_flatten_nested_and_flat_answers() {
+        let path = std::path::Path::new("/p/lib.rs");
+        let range = |line: u32| json!({ "start": { "line": line, "character": 4 }, "end": {} });
+        let nested = json!([{
+            "name": "Thing", "kind": 23, "range": range(0), "selectionRange": range(0),
+            "children": [{ "name": "new", "kind": 6, "detail": "fn() -> Self",
+                "range": range(2), "selectionRange": range(2) }],
+        }]);
+        let items = document_symbols(&nested, path);
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            (items[0].label.as_str(), items[0].detail.as_str()),
+            ("Thing", "struct")
+        );
+        assert_eq!(items[1].label, "  new");
+        assert_eq!(items[1].detail, "method · fn() -> Self");
+        assert_eq!((items[1].line, items[1].character), (2, 4));
+        assert_eq!(items[1].path, path);
+
+        let flat = json!([{ "name": "run", "kind": 12,
+            "location": { "uri": "file:///p/main.rs", "range": range(5) } }]);
+        let items = document_symbols(&flat, path);
+        assert_eq!(items[0].label, "run");
+        assert_eq!(items[0].detail, "function");
+        assert_eq!(items[0].line, 5);
+        assert_eq!(items[0].path, uri_to_path("file:///p/main.rs"));
+        assert_eq!(symbol_kind_name(0), "symbol");
+    }
+
+    #[test]
+    fn macro_expansions_become_scratch_files() {
+        let result = json!({ "name": "vec", "expansion": "<[_]>::into_vec(...)" });
+        assert_eq!(
+            macro_expansion(&result),
+            Some(("vec".into(), "<[_]>::into_vec(...)".into()))
+        );
+        assert_eq!(macro_expansion(&Value::Null), None);
+        assert_eq!(sanitize_file_name("my::mac"), "my__mac");
+        assert_eq!(sanitize_file_name(""), "macro");
     }
 
     #[test]

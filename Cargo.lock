@@ -1094,7 +1094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4143,7 +4143,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
@@ -5241,7 +5241,7 @@ dependencies = [
 [[package]]
 name = "mockaco-core"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=4625ca65df20d890522dcb2035caeb1870d1c27e#4625ca65df20d890522dcb2035caeb1870d1c27e"
 dependencies = [
  "ropey 1.6.1",
 ]
@@ -5249,7 +5249,7 @@ dependencies = [
 [[package]]
 name = "mockaco-diff"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=4625ca65df20d890522dcb2035caeb1870d1c27e#4625ca65df20d890522dcb2035caeb1870d1c27e"
 dependencies = [
  "mockaco-core",
  "similar 3.2.0",
@@ -5258,7 +5258,7 @@ dependencies = [
 [[package]]
 name = "mockaco-gpui"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=4625ca65df20d890522dcb2035caeb1870d1c27e#4625ca65df20d890522dcb2035caeb1870d1c27e"
 dependencies = [
  "gpui-ce",
  "mockaco-core",
@@ -5270,7 +5270,7 @@ dependencies = [
 [[package]]
 name = "mockaco-language"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=4625ca65df20d890522dcb2035caeb1870d1c27e#4625ca65df20d890522dcb2035caeb1870d1c27e"
 dependencies = [
  "mockaco-core",
  "streaming-iterator",
@@ -5281,7 +5281,7 @@ dependencies = [
 [[package]]
 name = "mockaco-renderer"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=dcddddffea6b4b6b9289337d6b42f9e22ec264ee#dcddddffea6b4b6b9289337d6b42f9e22ec264ee"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=4625ca65df20d890522dcb2035caeb1870d1c27e#4625ca65df20d890522dcb2035caeb1870d1c27e"
 dependencies = [
  "mockaco-core",
 ]
@@ -7133,7 +7133,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -7171,7 +7171,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -8421,7 +8421,7 @@ version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32824fab5e16e6c4d86dc1ba84489390419a39f97699852b66480bb87d297ed8"
 dependencies = [
- "dirs 6.0.0",
+ "dirs 5.0.1",
 ]
 
 [[package]]
@@ -11035,7 +11035,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
