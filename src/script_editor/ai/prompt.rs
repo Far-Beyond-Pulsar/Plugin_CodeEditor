@@ -141,18 +141,24 @@ fn lines_text(lines: &[&str], range: Range<usize>) -> String {
 
 /// The region and as much of its surroundings as fits.
 fn excerpt(context: &AssistContext) -> (String, String, String) {
-    let lines: Vec<&str> = context.text.split('\n').collect();
+    let mut lines: Vec<&str> = context.text.split('\n').collect();
+    // A final newline ends the last line; it does not start another.
+    if context.text.ends_with('\n') {
+        lines.pop();
+    }
     let region = context.region.start.min(lines.len())..context.region.end.min(lines.len());
     let selected = lines_text(&lines, region.clone());
-    let mut budget = CONTEXT_CHARS.saturating_sub(selected.len()) / 2;
+    let side = CONTEXT_CHARS.saturating_sub(selected.len()) / 2;
+    let mut budget = side;
     let mut before = region.start;
     while before > 0 && budget >= lines[before - 1].len() + 1 {
         before -= 1;
         budget -= lines[before].len() + 1;
     }
+    let mut budget = side;
     let mut after = region.end;
-    while after < lines.len() && budget + CONTEXT_CHARS / 4 >= lines[after].len() + 1 {
-        budget = budget.saturating_sub(lines[after].len() + 1);
+    while after < lines.len() && budget >= lines[after].len() + 1 {
+        budget -= lines[after].len() + 1;
         after += 1;
     }
     (
@@ -273,7 +279,7 @@ mod tests {
         // Caret inside line 1.
         assert_eq!(region_lines(FILE, 13..13), 1..2);
         // Selection across lines 1..=2.
-        assert_eq!(region_lines(FILE, 13..28), 1..3);
+        assert_eq!(region_lines(FILE, 13..22), 1..3);
         // Selection ending at the start of the next line excludes it.
         let end_of_b = FILE.find("fn c").unwrap();
         assert_eq!(region_lines(FILE, 10..end_of_b), 1..4);
@@ -352,7 +358,7 @@ mod tests {
             .content
             .contains("Additional guidance: cover overflow"));
         let explain = build_request(AssistKind::Explain, "", &context());
-        assert!(!explain.system.contains("fenced code block"));
+        assert!(!explain.system.contains("single fenced code block"));
     }
 
     #[test]

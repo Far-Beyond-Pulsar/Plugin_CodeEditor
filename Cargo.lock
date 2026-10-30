@@ -5450,6 +5450,7 @@ dependencies = [
 [[package]]
 name = "mockaco-core"
 version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e3bb37436ed36b0316cda1b059e4238a676afd70#e3bb37436ed36b0316cda1b059e4238a676afd70"
 dependencies = [
  "regex",
  "ropey 1.6.1",
@@ -5458,6 +5459,7 @@ dependencies = [
 [[package]]
 name = "mockaco-diff"
 version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e3bb37436ed36b0316cda1b059e4238a676afd70#e3bb37436ed36b0316cda1b059e4238a676afd70"
 dependencies = [
  "mockaco-core",
  "similar 3.2.0",
@@ -5466,6 +5468,7 @@ dependencies = [
 [[package]]
 name = "mockaco-gpui"
 version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e3bb37436ed36b0316cda1b059e4238a676afd70#e3bb37436ed36b0316cda1b059e4238a676afd70"
 dependencies = [
  "gpui-ce",
  "mockaco-core",
@@ -5477,6 +5480,7 @@ dependencies = [
 [[package]]
 name = "mockaco-language"
 version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e3bb37436ed36b0316cda1b059e4238a676afd70#e3bb37436ed36b0316cda1b059e4238a676afd70"
 dependencies = [
  "mockaco-core",
  "streaming-iterator",
@@ -5487,6 +5491,7 @@ dependencies = [
 [[package]]
 name = "mockaco-renderer"
 version = "0.1.0"
+source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e3bb37436ed36b0316cda1b059e4238a676afd70#e3bb37436ed36b0316cda1b059e4238a676afd70"
 dependencies = [
  "mockaco-core",
 ]
@@ -12341,7 +12346,3 @@ dependencies = [
  "syn 3.0.6",
  "winnow 1.0.4",
 ]
-
-[[patch.unused]]
-name = "mockaco-lsp"
-version = "0.1.0"

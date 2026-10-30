@@ -493,7 +493,7 @@ mod tests {
         let text = "fn é() {}\nlet x = 1;\n";
         assert_eq!(line_column(text, 0), (1, 1));
         assert_eq!(line_column(text, text.find('x').unwrap()), (2, 5));
-        let selection = selection_json(text, 10..16);
+        let selection = selection_json(text, 11..17);
         assert_eq!(selection["start"]["line"], 2);
         assert_eq!(selection["text"], "let x ");
         assert_eq!(selection["lines"]["first"], 2);

@@ -182,10 +182,11 @@ mod tests {
 
     const SOURCE: &str = "fn a() {}\nfn b() {}\nfn c() {}\n";
 
-    fn open_editor(
-        cx: &mut TestAppContext,
+    fn open_editor<'a>(
+        cx: &'a mut TestAppContext,
         name: &str,
-    ) -> (Entity<TextEditor>, PathBuf, &mut VisualTestContext) {
+    ) -> (Entity<TextEditor>, PathBuf, &'a mut VisualTestContext) {
+        cx.update(|cx| ui::init(cx));
         let dir = std::env::temp_dir().join(format!("pulsar_ai_tools_{}_{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sample.rs");
