@@ -1,7 +1,9 @@
 //! Dock panels for the Script Editor.
 
+use super::ai::{AssistKind, InlineAssist, InlineAssistEvent};
 use super::file_explorer::FileExplorer;
 use super::text_editor::{
+    EditorAiAsk, EditorAiDocument, EditorAiEdit, EditorAiExplain, EditorAiFix, EditorAiTests,
     EditorAddCursorAbove, EditorAddCursorBelow, EditorAddNextOccurrence, EditorCloseBar,
     EditorCopy, EditorCopyPath, EditorCut, EditorExpandMacro, EditorFind, EditorFindNext,
     EditorFindPrevious, EditorFormatDocument, EditorFormatSelection, EditorGenerateStressFile,
@@ -14,7 +16,7 @@ use super::text_editor::{
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use mockaco_core::{CaseSensitivity, SearchQuery};
-use mockaco_gpui::native::WgpuiEditorView;
+use mockaco_gpui::native::{EditorEvent, WgpuiEditorView};
 use rust_i18n::t;
 use std::path::PathBuf;
 use ui::{
@@ -101,6 +103,8 @@ pub struct FilePanel {
     path: PathBuf,
     view: Entity<WgpuiEditorView>,
     bar: Option<Bar>,
+    /// The inline AI prompt open in this document, if any.
+    assist: Option<(Entity<InlineAssist>, Subscription)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -137,13 +141,51 @@ impl FilePanel {
                 .ok();
         }));
 
+        // Ctrl+I and Ctrl+. in the text open the AI prompt.
+        subscriptions.push(cx.subscribe_in(
+            &view,
+            window,
+            |this: &mut Self, _, event: &EditorEvent, window, cx| match event {
+                EditorEvent::InlineAssistRequested => {
+                    this.open_assist(AssistKind::Edit, window, cx)
+                }
+                EditorEvent::QuickFixRequested => this.open_assist(AssistKind::Fix, window, cx),
+                _ => {}
+            },
+        ));
+
         Self {
             text_editor: text_editor.downgrade(),
             path,
             view,
             bar: None,
+            assist: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    // ---- AI ------------------------------------------------------------------
+
+    /// Opens the inline prompt over the selection (or caret line), replacing
+    /// any prompt already open. Does nothing during an inline review.
+    fn open_assist(&mut self, kind: AssistKind, window: &mut Window, cx: &mut Context<Self>) {
+        if self.view.read(cx).is_reviewing() {
+            return;
+        }
+        if let Some((assist, _)) = self.assist.take() {
+            assist.update(cx, |assist, cx| assist.close(cx));
+        }
+        let assist = InlineAssist::open(self.view.clone(), self.path.clone(), kind, None, window, cx);
+        let subscription = cx.subscribe(&assist, |this, _, event: &InlineAssistEvent, cx| {
+            match event {
+                InlineAssistEvent::Closed => {
+                    this.assist = None;
+                    cx.notify();
+                }
+            }
+        });
+        self.assist = Some((assist, subscription));
+        cx.notify();
     }
 
     fn file_name(&self) -> String {
@@ -781,6 +823,24 @@ impl Render for FilePanel {
             .on_action(cx.listener(|this, _: &EditorAddNextOccurrence, _, cx| {
                 this.view.update(cx, |view, cx| view.add_next_occurrence(cx));
             }))
+            .on_action(cx.listener(|this, _: &EditorAiEdit, window, cx| {
+                this.open_assist(AssistKind::Edit, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorAiFix, window, cx| {
+                this.open_assist(AssistKind::Fix, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorAiAsk, window, cx| {
+                this.open_assist(AssistKind::Ask, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorAiExplain, window, cx| {
+                this.open_assist(AssistKind::Explain, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorAiDocument, window, cx| {
+                this.open_assist(AssistKind::Document, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &EditorAiTests, window, cx| {
+                this.open_assist(AssistKind::Tests, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &EditorToggleFindCase, _, cx| {
                 this.toggle_find(|find| &mut find.case_sensitive, cx)
             }))
@@ -841,6 +901,13 @@ impl Render for FilePanel {
                     .menu("Cut", Box::new(EditorCut))
                     .menu("Copy", Box::new(EditorCopy))
                     .menu("Paste", Box::new(EditorPaste))
+                    .separator()
+                    .menu("Edit with AI…  Ctrl+I", Box::new(EditorAiEdit))
+                    .menu("Fix with AI  Ctrl+.", Box::new(EditorAiFix))
+                    .menu("Ask AI…", Box::new(EditorAiAsk))
+                    .menu("Explain with AI", Box::new(EditorAiExplain))
+                    .menu("Document with AI", Box::new(EditorAiDocument))
+                    .menu("Write Tests with AI", Box::new(EditorAiTests))
                     .separator()
                     .menu("Go to Definition", Box::new(EditorGoToDefinition))
                     .menu("Go to References", Box::new(EditorGoToReferences))

@@ -188,7 +188,24 @@ impl EditorPluginEditor for ScriptEditorPlugin {
 }
 
 impl EditorPluginStatusbar for ScriptEditorPlugin {}
-impl EditorPluginAi for ScriptEditorPlugin {}
+impl EditorPluginAi for ScriptEditorPlugin {
+    fn ai_tools(&self) -> Vec<AiToolDefinition> {
+        script_editor::ai::tools::ai_tools()
+    }
+
+    fn execute_ai_tool(
+        &self,
+        file_path: &std::path::Path,
+        tool_name: &str,
+        tool_args: JsonValue,
+    ) -> Result<JsonValue, PluginError> {
+        script_editor::ai::tools::execute_ai_tool(file_path, tool_name, tool_args)
+    }
+
+    fn capabilities_for_file(&self, file_path: &std::path::Path) -> Vec<String> {
+        script_editor::ai::tools::capabilities_for_file(file_path)
+    }
+}
 impl EditorPluginComponents for ScriptEditorPlugin {
     fn component_definitions(&self) -> Vec<ComponentDefinition> {
         Vec::new()

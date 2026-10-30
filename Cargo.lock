@@ -1952,23 +1952,31 @@ dependencies = [
  "gpui-ce",
  "helio",
  "helio-asset-compat",
- "helio-default-graphs",
+ "helio-core",
+ "helio-default-passes",
+ "helio-graph-asset",
  "helio-mats",
  "helio-pass-billboard",
  "helio-pass-decal",
  "helio-pass-forward-lit",
  "helio-pass-gbuffer",
+ "helio-pass-portal-cull",
  "helio-pass-postprocess",
  "helio-pass-sky",
  "helio-pass-tsr",
+ "helio-pass-volumetric-fog",
  "helio-pass-voxel-planet",
  "helio-pass-water-sim",
+ "helio-vg-format",
+ "helio-vg-stream",
  "helio-voxel-data",
  "helio_component",
  "image",
+ "inventory",
  "libloading 0.9.0",
  "lsp-types",
  "parking_lot",
+ "pollster 0.4.0",
  "profiling 0.1.0",
  "psgc",
  "pulsar_class",
@@ -1981,6 +1989,7 @@ dependencies = [
  "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_script_object_model",
+ "pulsar_settings",
  "pulsar_world_registry",
  "rapier3d",
  "reqwest",
@@ -2026,6 +2035,7 @@ dependencies = [
  "plugin_manager",
  "profiling 0.1.0",
  "pulsar_reflection",
+ "rusqlite",
  "serde",
  "serde_json",
  "smol",
@@ -3151,6 +3161,7 @@ dependencies = [
 name = "graphy"
 version = "0.1.0"
 dependencies = [
+ "graphy-blueprint",
  "quote",
  "rayon",
  "rustc-hash 2.1.3",
@@ -3160,6 +3171,16 @@ dependencies = [
  "syn 2.0.119",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "graphy-blueprint"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -3286,7 +3307,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helio"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "arrayvec",
  "bytemuck",
@@ -3304,11 +3325,13 @@ dependencies = [
  "helio-pass-portal-cull",
  "helio-pass-portal-instances",
  "helio-pass-postprocess",
- "helio-pass-radiance-cascades",
  "helio-pass-shadow-matrix",
  "helio-pass-sky",
  "helio-pass-tsr",
  "helio-pass-volumetric-fog",
+ "helio-settings",
+ "helio-vg-format",
+ "helio-vg-stream",
  "helio-xr",
  "image",
  "log",
@@ -3362,34 +3385,38 @@ dependencies = [
  "notify 8.2.0",
  "profiling 0.1.0",
  "pulsar_scenedb",
+ "smallvec",
  "thiserror 2.0.20",
  "wgpu",
 ]
 
 [[package]]
-name = "helio-default-graphs"
+name = "helio-default-passes"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glam 0.33.8",
  "helio",
  "helio-core",
+ "helio-graph-asset",
  "helio-mats",
  "helio-pass-billboard",
+ "helio-pass-buffer-view",
  "helio-pass-corona",
  "helio-pass-debug-overlay",
  "helio-pass-decal",
  "helio-pass-deferred-light",
- "helio-pass-dof",
  "helio-pass-flare",
  "helio-pass-foliage-gbuffer",
  "helio-pass-foliage-place",
  "helio-pass-forward-lit",
  "helio-pass-fxaa",
  "helio-pass-gbuffer",
+ "helio-pass-gi",
  "helio-pass-hiz",
  "helio-pass-hlfs",
  "helio-pass-indirect-dispatch",
+ "helio-pass-lens",
  "helio-pass-light-cull",
  "helio-pass-object-batch",
  "helio-pass-occlusion-cull",
@@ -3409,14 +3436,43 @@ dependencies = [
  "helio-pass-ssr",
  "helio-pass-transparent",
  "helio-pass-tsr",
- "helio-pass-virtual-geometry",
+ "helio-pass-vg-bvh",
+ "helio-pass-vg-cull",
+ "helio-pass-vg-dense",
+ "helio-pass-vg-raster",
+ "helio-pass-vg-shade",
  "helio-pass-volumetric-fog",
+ "helio-pass-voxel-planet",
  "helio-pass-water-sim",
+ "helio-vg-format",
+ "helio-vg-stream",
  "image",
  "log",
  "pulsar_scenedb",
+ "serde_json",
  "twox-hash",
  "wgpu",
+]
+
+[[package]]
+name = "helio-graph-asset"
+version = "0.1.0"
+dependencies = [
+ "helio",
+ "helio-core",
+ "log",
+ "serde",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-lens-optics"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3438,6 +3494,14 @@ dependencies = [
  "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-buffer-view"
+version = "0.1.0"
+dependencies = [
+ "helio-core",
  "wgpu",
 ]
 
@@ -3485,7 +3549,7 @@ dependencies = [
  "bytemuck",
  "helio-core",
  "helio-mats",
- "helio-pass-radiance-cascades",
+ "helio-pass-gi",
  "helio-pass-shadow-matrix",
  "helio-pass-sky",
  "pulsar_reflection",
@@ -3495,20 +3559,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "helio-pass-dof"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "helio-core",
- "wgpu",
-]
-
-[[package]]
 name = "helio-pass-flare"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
+ "helio-pass-lens",
  "helio-pass-shadow-matrix",
  "wgpu",
 ]
@@ -3574,13 +3630,26 @@ dependencies = [
  "glam 0.33.8",
  "helio-core",
  "helio-mats",
- "helio-pass-radiance-cascades",
  "helio-pass-shadow-matrix",
+ "image",
  "log",
  "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
  "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-gi"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam 0.33.8",
+ "helio-core",
+ "helio-mats",
+ "helio-pass-shadow-matrix",
+ "helio-pass-sky",
  "wgpu",
 ]
 
@@ -3602,6 +3671,7 @@ dependencies = [
  "glam 0.33.8",
  "helio-core",
  "helio-pass-gbuffer",
+ "helio-pass-gi",
  "helio-pass-shadow-matrix",
  "wgpu",
 ]
@@ -3613,6 +3683,19 @@ dependencies = [
  "bytemuck",
  "helio-core",
  "helio-pass-gbuffer",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-lens"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "helio-core",
+ "helio-lens-optics",
+ "pulsar_reflection",
+ "pulsar_scenedb",
+ "pulsar_scenedb_derive",
  "wgpu",
 ]
 
@@ -3707,16 +3790,6 @@ dependencies = [
  "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
- "wgpu",
-]
-
-[[package]]
-name = "helio-pass-radiance-cascades"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "helio-core",
- "helio-pass-sky",
  "wgpu",
 ]
 
@@ -3843,22 +3916,81 @@ name = "helio-pass-tsr"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "glam 0.33.8",
  "helio-core",
  "wgpu",
 ]
 
 [[package]]
-name = "helio-pass-virtual-geometry"
+name = "helio-pass-vg-bvh"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "helio-core",
+ "helio-pass-gbuffer",
+ "helio-vg-format",
+ "log",
+ "pulsar_scenedb",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-vg-cull"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
  "helio-core",
  "helio-mats",
- "helio-pass-gbuffer",
- "helio-pass-object-batch",
- "helio-pass-radiance-cascades",
+ "helio-pass-vg-bvh",
+ "helio-vg-format",
+ "helio-vg-stream",
  "log",
- "pulsar_scenedb",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-vg-dense"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "helio-core",
+ "helio-mats",
+ "helio-pass-vg-cull",
+ "helio-pass-vg-raster",
+ "helio-vg-format",
+ "helio-vg-stream",
+ "log",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-vg-raster"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "helio-core",
+ "helio-mats",
+ "helio-pass-vg-cull",
+ "helio-vg-format",
+ "log",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-pass-vg-shade"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam 0.33.8",
+ "helio-core",
+ "helio-mats",
+ "helio-pass-shadow-matrix",
+ "helio-pass-vg-cull",
+ "helio-pass-vg-dense",
+ "helio-pass-vg-raster",
+ "helio-vg-format",
+ "helio-vg-stream",
+ "log",
  "wgpu",
 ]
 
@@ -3870,6 +4002,7 @@ dependencies = [
  "helio-core",
  "helio-pass-postprocess",
  "helio-pass-shadow-matrix",
+ "helio-pass-sky",
  "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
@@ -3883,6 +4016,14 @@ dependencies = [
  "bytemuck",
  "glam 0.33.8",
  "helio-core",
+ "helio-mats",
+ "helio-pass-foliage-place",
+ "helio-pass-gi",
+ "helio-pass-shadow-matrix",
+ "helio-settings",
+ "image",
+ "miniz_oxide 0.8.9",
+ "rayon",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
@@ -3894,13 +4035,27 @@ name = "helio-pass-water-sim"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "glam 0.33.8",
  "helio-core",
+ "helio-mats",
+ "helio-pass-deferred-light",
+ "helio-pass-gbuffer",
  "helio-pass-hiz",
+ "helio-pass-indirect-dispatch",
+ "helio-pass-object-batch",
+ "helio-pass-occlusion-cull",
+ "helio-pass-sky",
+ "helio-pass-voxel-planet",
  "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
+ "rayon",
  "wgpu",
 ]
+
+[[package]]
+name = "helio-settings"
+version = "0.1.0"
 
 [[package]]
 name = "helio-snapshot"
@@ -3911,7 +4066,7 @@ dependencies = [
  "glam 0.33.8",
  "helio",
  "helio-asset-compat",
- "helio-default-graphs",
+ "helio-default-passes",
  "helio-pass-forward-lit",
  "helio-pass-gbuffer",
  "image",
@@ -3919,6 +4074,34 @@ dependencies = [
  "pollster 0.4.0",
  "pulsar_scenedb",
  "thiserror 2.0.20",
+ "wgpu",
+]
+
+[[package]]
+name = "helio-vg-build"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "helio-vg-format",
+ "meshopt",
+ "rayon",
+]
+
+[[package]]
+name = "helio-vg-format"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
+name = "helio-vg-stream"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "helio-vg-format",
+ "log",
+ "pulsar_scenedb",
  "wgpu",
 ]
 
@@ -3957,18 +4140,24 @@ dependencies = [
  "gpui-ce",
  "helio",
  "helio-asset-compat",
+ "helio-core",
  "helio-mats",
  "helio-pass-corona",
  "helio-pass-decal",
  "helio-pass-foliage-place",
+ "helio-pass-lens",
  "helio-pass-postprocess",
  "helio-pass-sky",
  "helio-pass-sprite-batch",
  "helio-pass-volumetric-fog",
  "helio-pass-voxel-planet",
  "helio-pass-water-sim",
+ "helio-vg-build",
+ "helio-vg-format",
+ "helio-vg-stream",
  "helio-voxel-data",
  "image",
+ "intel_tex_2",
  "plugin_editor_api",
  "psgc",
  "pulsar_events",
@@ -3979,6 +4168,7 @@ dependencies = [
  "pulsar_world_registry",
  "serde",
  "serde_json",
+ "skeletal_assets",
  "thiserror 2.0.20",
  "tracing",
  "twox-hash",
@@ -4434,6 +4624,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "intel_tex_2"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7980d359170e7da4bc2421aa74c49d338a3153313e006d732a3430f1af375a60"
+dependencies = [
+ "ispc_rt",
+]
+
+[[package]]
 name = "intrusive-collections"
 version = "0.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4495,6 +4694,16 @@ checksum = "173609498df190136aa7dea1a91db051746d339e18476eed5ca40521f02d7aa5"
 dependencies = [
  "is-docker",
  "once_cell",
+]
+
+[[package]]
+name = "ispc_rt"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a396f76fd253fab9945bb4c6080f515d0c4036bc30219462d199b58886fd37b4"
+dependencies = [
+ "libc",
+ "num_cpus",
 ]
 
 [[package]]
@@ -5241,7 +5450,6 @@ dependencies = [
 [[package]]
 name = "mockaco-core"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e36ce16e76716b7494a7388e3ba51505111246b8#e36ce16e76716b7494a7388e3ba51505111246b8"
 dependencies = [
  "regex",
  "ropey 1.6.1",
@@ -5250,7 +5458,6 @@ dependencies = [
 [[package]]
 name = "mockaco-diff"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e36ce16e76716b7494a7388e3ba51505111246b8#e36ce16e76716b7494a7388e3ba51505111246b8"
 dependencies = [
  "mockaco-core",
  "similar 3.2.0",
@@ -5259,7 +5466,6 @@ dependencies = [
 [[package]]
 name = "mockaco-gpui"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e36ce16e76716b7494a7388e3ba51505111246b8#e36ce16e76716b7494a7388e3ba51505111246b8"
 dependencies = [
  "gpui-ce",
  "mockaco-core",
@@ -5271,7 +5477,6 @@ dependencies = [
 [[package]]
 name = "mockaco-language"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e36ce16e76716b7494a7388e3ba51505111246b8#e36ce16e76716b7494a7388e3ba51505111246b8"
 dependencies = [
  "mockaco-core",
  "streaming-iterator",
@@ -5282,7 +5487,6 @@ dependencies = [
 [[package]]
 name = "mockaco-renderer"
 version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Mockaco?rev=e36ce16e76716b7494a7388e3ba51505111246b8#e36ce16e76716b7494a7388e3ba51505111246b8"
 dependencies = [
  "mockaco-core",
 ]
@@ -6531,6 +6735,7 @@ dependencies = [
  "pulsar_script_vm",
  "pulsar_world_registry",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "tracing",
@@ -6543,6 +6748,7 @@ dependencies = [
 name = "plugin_manager"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "engine_subsystems",
  "gpui-ce",
  "inventory",
@@ -6916,6 +7122,7 @@ dependencies = [
  "pulsar_world_registry",
  "serde",
  "serde_json",
+ "skeletal_assets",
  "tracing",
  "wgpu",
 ]
@@ -6993,7 +7200,7 @@ dependencies = [
 [[package]]
 name = "pulsar_scenedb"
 version = "0.1.0"
-source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=81bb3557b71014ccc00f1275f60138867cc492ea#81bb3557b71014ccc00f1275f60138867cc492ea"
+source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=017252c3c84331a29e53eaa627185597954a3241#017252c3c84331a29e53eaa627185597954a3241"
 dependencies = [
  "ahash",
  "profiling 0.1.0",
@@ -7009,7 +7216,7 @@ dependencies = [
 [[package]]
 name = "pulsar_scenedb_derive"
 version = "0.1.0"
-source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=81bb3557b71014ccc00f1275f60138867cc492ea#81bb3557b71014ccc00f1275f60138867cc492ea"
+source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=017252c3c84331a29e53eaa627185597954a3241#017252c3c84331a29e53eaa627185597954a3241"
 dependencies = [
  "proc-macro2",
  "pulsar_reflection_codegen",
@@ -7060,6 +7267,7 @@ dependencies = [
 name = "pulsar_settings"
 version = "0.1.0"
 dependencies = [
+ "helio-settings",
  "pulsar-config",
 ]
 
@@ -8117,6 +8325,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar 2.7.0",
+ "tool_registry",
  "tracing",
  "tracing-subscriber",
  "ui",
@@ -8510,6 +8719,21 @@ name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
+
+[[package]]
+name = "skeletal_assets"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "engine_fs",
+ "glam 0.33.8",
+ "graphy-blueprint",
+ "pulsar_reflection",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "uuid",
+]
 
 [[package]]
 name = "skrifa"
@@ -10202,6 +10426,7 @@ dependencies = [
  "rust-i18n-support",
  "serde",
  "serde_json",
+ "skeletal_assets",
  "smallvec",
  "smol",
  "tracing",
@@ -12116,3 +12341,7 @@ dependencies = [
  "syn 3.0.6",
  "winnow 1.0.4",
 ]
+
+[[patch.unused]]
+name = "mockaco-lsp"
+version = "0.1.0"

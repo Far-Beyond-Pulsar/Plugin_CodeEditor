@@ -296,7 +296,14 @@ impl TextEditor {
             EditorEvent::CompletionCommitted { host_data } => {
                 self.lsp_commit(index, *host_data, cx)
             }
-            EditorEvent::Changed | EditorEvent::SaveRequested => {}
+            // The panel that shows this document answers the AI events.
+            EditorEvent::Changed
+            | EditorEvent::SaveRequested
+            | EditorEvent::SelectionChanged
+            | EditorEvent::InlineAssistRequested
+            | EditorEvent::QuickFixRequested
+            | EditorEvent::ReviewUpdated { .. }
+            | EditorEvent::ReviewFinished { .. } => {}
         }
     }
 

@@ -28,10 +28,10 @@ ui_types_common = { path = "../../../crates/editor/ui_types_common" }
 
 # Keep Mockaco and WGPUI on the same tree-sitter 0.25-compatible API.
 # The host adapter bridges clipboard/history/navigation on this API.
-mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e36ce16e76716b7494a7388e3ba51505111246b8", features = ["native-wgpui"] }
-mockaco-language = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e36ce16e76716b7494a7388e3ba51505111246b8" }
-mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e36ce16e76716b7494a7388e3ba51505111246b8" }
-mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e36ce16e76716b7494a7388e3ba51505111246b8" }
+mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70", features = ["native-wgpui"] }
+mockaco-language = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70" }
+mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70" }
+mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70" }
 
 # Engine dependencies
 engine_state  = { path = "../../../crates/core/engine_state" }
@@ -53,6 +53,9 @@ serde_json = "1.0.149"
 
 # Async operations
 futures = "0.3"
+
+# Chat-panel tools
+tool_registry = { git = "https://github.com/Far-Beyond-Pulsar/ToolbeltRS", rev = "116b9028bad6b9467073de2534be60ef4df9b279" }
 
 # Diff utilities
 similar = "2.2"
@@ -132,8 +135,8 @@ pulsar_reflection_codegen = { path = "../../../crates/external/pulsar-reflection
 # The patch VALUE uses the `//`-spelled URL: cargo refuses a patch that resolves
 # to the exact same source, so the alternate spelling carries the pushed rev.
 [patch."https://github.com/Far-Beyond-Pulsar/SceneDB"]
-pulsar_scenedb = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "8b5b1144c4ef80411592985fcd9767134ee03941" }
-pulsar_scenedb_derive = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "8b5b1144c4ef80411592985fcd9767134ee03941" }
+pulsar_scenedb = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "017252c3c84331a29e53eaa627185597954a3241" }
+pulsar_scenedb_derive = { git = "https://github.com//Far-Beyond-Pulsar/SceneDB", rev = "017252c3c84331a29e53eaa627185597954a3241" }
 
 [profile.dev.package."*"]
 # Keep our crate fast to compile, but optimize heavy dependencies

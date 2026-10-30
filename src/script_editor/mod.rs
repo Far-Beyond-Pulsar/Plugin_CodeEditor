@@ -1,3 +1,4 @@
+pub mod ai;
 mod autocomplete_integration;
 mod file_explorer;
 pub mod languages;

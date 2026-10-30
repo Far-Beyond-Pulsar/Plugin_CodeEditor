@@ -10,8 +10,10 @@
 //! [`super::FilePanel`] living in the editor's dock, which is what gives the
 //! editor real tabs, splits and drag-and-drop.
 
+mod buffer_tools;
 mod lsp;
 
+use super::ai::tools::{self as ai_tools, BufferRequest};
 use gpui::*;
 use mockaco_diff::DiffRowKind;
 use mockaco_gpui::native::{EditorEvent, WgpuiEditorView};
@@ -64,6 +66,14 @@ actions!(
         EditorToggleFindCase,
         EditorToggleFindWholeWord,
         EditorToggleFindRegex,
+        /// The AI commands: Ctrl+I opens the inline prompt (Edit); these open
+        /// it already set to one kind of request.
+        EditorAiEdit,
+        EditorAiFix,
+        EditorAiAsk,
+        EditorAiExplain,
+        EditorAiDocument,
+        EditorAiTests,
     ]
 );
 
@@ -122,6 +132,8 @@ pub struct TextEditor {
     /// Counts location requests, so only the latest one's answer is shown
     /// (workspace symbols ask again on every keystroke).
     locations_request: u64,
+    /// Where the chat panel's tools reach this editor's documents.
+    ai_requests: futures::channel::mpsc::UnboundedSender<BufferRequest>,
 }
 
 impl TextEditor {
@@ -138,6 +150,7 @@ impl TextEditor {
         cx: &mut Context<Self>,
         settings: plugin_editor_api::EditorSettingsSnapshot,
     ) -> Self {
+        let (ai_requests, receiver) = futures::channel::mpsc::unbounded();
         let mut editor = Self {
             focus_handle: cx.focus_handle(),
             open_files: Vec::new(),
@@ -147,7 +160,9 @@ impl TextEditor {
             lsp: None,
             locations: None,
             locations_request: 0,
+            ai_requests,
         };
+        editor.serve_ai_requests(receiver, cx);
         // The language server arrives through the plugin API's context.
         if let Some(analyzer) = settings.services().language_server.clone() {
             editor.set_rust_analyzer(analyzer, cx);
@@ -188,6 +203,7 @@ impl TextEditor {
                 this.on_editor_event(&event_path, &view, event, cx);
             },
         );
+        ai_tools::register(&path, self.ai_requests.clone());
         self.open_files.push(OpenFile {
             path,
             view,
@@ -351,6 +367,7 @@ impl TextEditor {
             return;
         }
         let file = self.open_files.remove(index);
+        ai_tools::unregister(&file.path);
         self.lsp_close(&file, cx);
         cx.emit(TextEditorEvent::FileClosed { path: file.path });
         self.current_file_index = if self.open_files.is_empty() {
@@ -452,6 +469,7 @@ impl TextEditor {
             return;
         };
         let file = self.open_files.remove(index);
+        ai_tools::unregister(&file.path);
         self.lsp_close(&file, cx);
         cx.emit(TextEditorEvent::FileClosed { path: file.path });
         self.current_file_index = match self.current_file_index {
