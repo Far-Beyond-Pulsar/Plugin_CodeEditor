@@ -14,8 +14,8 @@ builtin = []
 
 [dependencies]
 # The plugin's descriptor and its editor provider's registration.
-pulsar_plugins = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "c49f7b393afe468aec47895c3f159a7451d23963" }
-plugin_manager = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "c49f7b393afe468aec47895c3f159a7451d23963" }
+pulsar_plugins = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "838f6accad39dc4c1bd9016fca7f9867a06cbe73" }
+plugin_manager = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "838f6accad39dc4c1bd9016fca7f9867a06cbe73" }
 # Plugin API
 plugin_editor_api = { path = "../../../crates/core/plugin_editor_api" }
 
@@ -103,6 +103,8 @@ ui_common         = { path = "../../../crates/editor/ui_common" }
 ui_types_common   = { path = "../../../crates/editor/ui_types_common" }
 engine_state      = { path = "../../../crates/core/engine_state" }
 engine_backend    = { path = "../../../crates/core/engine_backend" }
+pulsar_plugins    = { path = "../../../crates/core/pulsar_plugins" }
+plugin_manager    = { path = "../../../crates/core/plugin_manager" }
 profiling         = { path = "../../../crates/profiling" }
 
 [patch."https://github.com/Far-Beyond-Pulsar/Pulsar-Profiling"]
