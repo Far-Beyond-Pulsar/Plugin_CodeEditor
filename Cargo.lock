@@ -1915,7 +1915,7 @@ dependencies = [
  "dashmap",
  "engine_fs",
  "engine_state",
- "engine_subsystems 0.1.0",
+ "engine_subsystems",
  "flume",
  "futures",
  "git2 0.21.0",
@@ -1940,18 +1940,18 @@ dependencies = [
  "pollster 0.4.0",
  "profiling 0.1.0",
  "pulsar_class",
- "pulsar_events 0.1.0",
+ "pulsar_events",
  "pulsar_lsp",
  "pulsar_physics",
  "pulsar_pie_abi",
- "pulsar_plugins 0.1.0",
- "pulsar_reflection 0.1.0",
+ "pulsar_plugins",
+ "pulsar_reflection",
  "pulsar_scene",
- "pulsar_scene_model 0.1.0",
+ "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_script_object_model",
  "pulsar_settings",
- "pulsar_world_registry 0.1.0",
+ "pulsar_world_registry",
  "rapier3d",
  "reqwest",
  "ropey 2.0.0-beta.1",
@@ -1993,9 +1993,9 @@ dependencies = [
  "notify 8.2.0",
  "parking_lot",
  "plugin_editor_api",
- "plugin_manager 0.1.0",
+ "plugin_manager",
  "profiling 0.1.0",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2024,7 +2024,7 @@ dependencies = [
  "pulsar-config",
  "pulsar-multiplayer-core",
  "pulsar_auth",
- "pulsar_plugins 0.1.0",
+ "pulsar_plugins",
  "pulsar_settings",
  "rust-discord-activity",
  "serde",
@@ -2040,16 +2040,6 @@ dependencies = [
 [[package]]
 name = "engine_subsystems"
 version = "0.1.0"
-dependencies = [
- "profiling 0.1.0",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
-name = "engine_subsystems"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
 dependencies = [
  "profiling 0.1.0",
  "thiserror 2.0.20",
@@ -3283,7 +3273,7 @@ dependencies = [
  "log",
  "openxr",
  "pollster 0.4.0",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "quark",
  "thiserror 2.0.20",
@@ -3434,7 +3424,7 @@ dependencies = [
  "bytemuck",
  "helio-core",
  "helio-frame-api",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "wgpu",
 ]
@@ -3561,13 +3551,13 @@ dependencies = [
  "intel_tex_2",
  "inventory",
  "plugin_editor_api",
- "pulsar_events 0.1.0",
- "pulsar_plugins 0.1.0",
- "pulsar_reflection 0.1.0",
- "pulsar_scene_model 0.1.0",
+ "pulsar_events",
+ "pulsar_plugins",
+ "pulsar_reflection",
+ "pulsar_scene_model",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
- "pulsar_world_registry 0.1.0",
+ "pulsar_world_registry",
  "serde",
  "serde_json",
  "tracing",
@@ -6177,16 +6167,16 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "plugin_editor_api"
 version = "0.1.0"
 dependencies = [
- "engine_subsystems 0.1.0",
+ "engine_subsystems",
  "gamma",
  "gpui-ce",
  "inventory",
  "profiling 0.1.0",
- "pulsar_events 0.1.0",
+ "pulsar_events",
  "pulsar_lsp",
- "pulsar_reflection 0.1.0",
- "pulsar_script_vm 0.1.0",
- "pulsar_world_registry 0.1.0",
+ "pulsar_reflection",
+ "pulsar_script_vm",
+ "pulsar_world_registry",
  "schemars",
  "semver",
  "serde",
@@ -6202,7 +6192,7 @@ name = "plugin_manager"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
- "engine_subsystems 0.1.0",
+ "engine_subsystems",
  "gpui-ce",
  "inventory",
  "libloading 0.9.0",
@@ -6210,33 +6200,9 @@ dependencies = [
  "parking_lot",
  "plugin_editor_api",
  "profiling 0.1.0",
- "pulsar_events 0.1.0",
- "pulsar_plugins 0.1.0",
- "pulsar_world_registry 0.1.0",
- "serde_json",
- "sha2 0.11.0",
- "tracing",
- "ui",
- "walkdir",
-]
-
-[[package]]
-name = "plugin_manager"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "arc-swap",
- "engine_subsystems 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "gpui-ce",
- "inventory",
- "libloading 0.9.0",
- "once_cell",
- "parking_lot",
- "plugin_editor_api",
- "profiling 0.1.0",
- "pulsar_events 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_plugins 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_world_registry 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
+ "pulsar_events",
+ "pulsar_plugins",
+ "pulsar_world_registry",
  "serde_json",
  "sha2 0.11.0",
  "tracing",
@@ -6539,11 +6505,11 @@ dependencies = [
  "engine_fs",
  "glam 0.33.8",
  "inventory",
- "pulsar_plugins 0.1.0",
- "pulsar_reflection 0.1.0",
- "pulsar_scene_model 0.1.0",
+ "pulsar_plugins",
+ "pulsar_reflection",
+ "pulsar_scene_model",
  "pulsar_scenedb",
- "pulsar_world_registry 0.1.0",
+ "pulsar_world_registry",
  "serde",
  "serde_json",
  "tracing",
@@ -6553,19 +6519,6 @@ dependencies = [
 [[package]]
 name = "pulsar_events"
 version = "0.1.0"
-dependencies = [
- "gamma",
- "profiling 0.1.0",
- "serde",
- "serde_json",
- "tracing",
- "ui_types_common",
-]
-
-[[package]]
-name = "pulsar_events"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
 dependencies = [
  "gamma",
  "profiling 0.1.0",
@@ -6597,10 +6550,10 @@ dependencies = [
  "bytemuck",
  "engine_class_derive",
  "helio-water-api",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "pulsar_scenedb_derive",
- "pulsar_world_registry 0.1.0",
+ "pulsar_world_registry",
  "serde",
  "serde_json",
  "skeletal_assets",
@@ -6623,17 +6576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pulsar_plugins"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "inventory",
- "serde",
- "toml 1.1.6+spec-1.1.0",
- "tracing",
-]
-
-[[package]]
 name = "pulsar_reflection"
 version = "0.1.0"
 dependencies = [
@@ -6642,7 +6584,7 @@ dependencies = [
  "gpui-ce",
  "inventory",
  "once_cell",
- "pulsar_reflection_derive 0.1.0",
+ "pulsar_reflection_derive",
  "serde",
  "serde_json",
  "tracing",
@@ -6651,34 +6593,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "pulsar_reflection"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "dashmap",
- "glam 0.33.8",
- "inventory",
- "once_cell",
- "pulsar_reflection_derive 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "pulsar_reflection_codegen"
 version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "pulsar_reflection_codegen"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6691,19 +6607,7 @@ version = "0.1.0"
 dependencies = [
  "owo-colors",
  "proc-macro2",
- "pulsar_reflection_codegen 0.1.0",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "pulsar_reflection_derive"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "owo-colors",
- "proc-macro2",
- "pulsar_reflection_codegen 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
+ "pulsar_reflection_codegen",
  "quote",
  "syn 2.0.119",
 ]
@@ -6713,7 +6617,7 @@ name = "pulsar_scene"
 version = "0.1.0"
 dependencies = [
  "engine_fs",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "serde",
  "serde_json",
  "tracing",
@@ -6725,23 +6629,7 @@ version = "0.1.0"
 dependencies = [
  "glam 0.33.8",
  "inventory",
- "pulsar_reflection 0.1.0",
- "pulsar_scenedb",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "uuid",
- "wgpu",
-]
-
-[[package]]
-name = "pulsar_scene_model"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "glam 0.33.8",
- "inventory",
- "pulsar_reflection 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "serde",
  "serde_json",
@@ -6757,7 +6645,7 @@ source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=017252c3c84331a2
 dependencies = [
  "ahash",
  "profiling 0.1.0",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb_derive",
  "serde",
  "serde_json",
@@ -6772,7 +6660,7 @@ version = "0.1.0"
 source = "git+https://github.com//Far-Beyond-Pulsar/SceneDB?rev=017252c3c84331a29e53eaa627185597954a3241#017252c3c84331a29e53eaa627185597954a3241"
 dependencies = [
  "proc-macro2",
- "pulsar_reflection_codegen 0.1.0",
+ "pulsar_reflection_codegen",
  "quote",
  "syn 2.0.119",
 ]
@@ -6782,17 +6670,7 @@ name = "pulsar_script_math"
 version = "0.1.0"
 dependencies = [
  "glam 0.33.8",
- "pulsar_script_vm 0.1.0",
- "serde_json",
-]
-
-[[package]]
-name = "pulsar_script_math"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "glam 0.33.8",
- "pulsar_script_vm 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
+ "pulsar_script_vm",
  "serde_json",
 ]
 
@@ -6801,10 +6679,10 @@ name = "pulsar_script_object_model"
 version = "0.1.0"
 dependencies = [
  "inventory",
- "pulsar_reflection 0.1.0",
- "pulsar_scene_model 0.1.0",
+ "pulsar_reflection",
+ "pulsar_scene_model",
  "pulsar_scenedb",
- "pulsar_world_registry 0.1.0",
+ "pulsar_world_registry",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -6818,23 +6696,7 @@ dependencies = [
  "bincode",
  "inventory",
  "libloading 0.9.0",
- "pulsar_reflection 0.1.0",
- "pulsar_scenedb",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
-name = "pulsar_script_vm"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "bincode",
- "inventory",
- "libloading 0.9.0",
- "pulsar_reflection 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "serde",
  "serde_json",
@@ -6849,7 +6711,7 @@ dependencies = [
  "helio-settings",
  "inventory",
  "pulsar-config",
- "pulsar_plugins 0.1.0",
+ "pulsar_plugins",
 ]
 
 [[package]]
@@ -6857,33 +6719,13 @@ name = "pulsar_world_registry"
 version = "0.1.0"
 dependencies = [
  "inventory",
- "pulsar_events 0.1.0",
- "pulsar_plugins 0.1.0",
- "pulsar_reflection 0.1.0",
- "pulsar_scene_model 0.1.0",
+ "pulsar_events",
+ "pulsar_plugins",
+ "pulsar_reflection",
+ "pulsar_scene_model",
  "pulsar_scenedb",
- "pulsar_script_math 0.1.0",
- "pulsar_script_vm 0.1.0",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
-name = "pulsar_world_registry"
-version = "0.1.0"
-source = "git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73#838f6accad39dc4c1bd9016fca7f9867a06cbe73"
-dependencies = [
- "inventory",
- "pulsar_events 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_plugins 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_reflection 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_scene_model 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_scenedb",
- "pulsar_script_math 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_script_vm 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
+ "pulsar_script_math",
+ "pulsar_script_vm",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -7850,7 +7692,7 @@ name = "scenedb-inspector-agent"
 version = "0.1.0"
 dependencies = [
  "log",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "pulsar_scenedb",
  "serde_json",
  "shared_memory",
@@ -7920,8 +7762,8 @@ dependencies = [
  "mockaco-language",
  "parking_lot",
  "plugin_editor_api",
- "plugin_manager 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
- "pulsar_plugins 0.1.0 (git+https://github.com/Far-Beyond-Pulsar/Pulsar-Native?rev=838f6accad39dc4c1bd9016fca7f9867a06cbe73)",
+ "plugin_manager",
+ "pulsar_plugins",
  "rust-i18n",
  "rust-i18n-macro",
  "rust-i18n-support",
@@ -8332,7 +8174,7 @@ dependencies = [
  "engine_fs",
  "glam 0.33.8",
  "graphy-blueprint",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -9942,7 +9784,7 @@ dependencies = [
  "parking_lot",
  "plugin_editor_api",
  "pulsar_auth",
- "pulsar_reflection 0.1.0",
+ "pulsar_reflection",
  "reqwest",
  "rust-i18n",
  "rust-i18n-macro",

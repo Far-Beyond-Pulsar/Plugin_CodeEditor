@@ -103,6 +103,8 @@ ui_common         = { path = "../../../crates/editor/ui_common" }
 ui_types_common   = { path = "../../../crates/editor/ui_types_common" }
 engine_state      = { path = "../../../crates/core/engine_state" }
 engine_backend    = { path = "../../../crates/core/engine_backend" }
+pulsar_plugins    = { path = "../../../crates/core/pulsar_plugins" }
+plugin_manager    = { path = "../../../crates/core/plugin_manager" }
 profiling         = { path = "../../../crates/profiling" }
 
 [patch."https://github.com/Far-Beyond-Pulsar/Pulsar-Profiling"]
