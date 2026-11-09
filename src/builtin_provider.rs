@@ -178,6 +178,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
 plugin_manager::inventory::submit! {
     plugin_manager::PluginEditorProvider {
         origin: pulsar_plugins::origin!(),
+        id: "com.pulsar.script-editor",
         create: || Arc::new(ScriptEditorBuiltinProvider),
     }
 }
