@@ -14,8 +14,8 @@ builtin = []
 
 [dependencies]
 # The plugin's descriptor and its editor provider's registration.
-pulsar_plugins = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "838f6accad39dc4c1bd9016fca7f9867a06cbe73" }
-plugin_manager = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "838f6accad39dc4c1bd9016fca7f9867a06cbe73" }
+pulsar_plugins = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "380707ef2a6b6d0e3e7ff3cfc827b10c0a093e6b" }
+plugin_manager = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "380707ef2a6b6d0e3e7ff3cfc827b10c0a093e6b" }
 # Plugin API
 plugin_editor_api = { path = "../../../crates/core/plugin_editor_api" }
 
