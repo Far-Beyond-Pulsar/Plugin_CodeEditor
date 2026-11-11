@@ -9,7 +9,7 @@ use engine_backend::services::lsp_completion_provider::GlobalRustAnalyzerComplet
 use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
 
 fn workspace_from_file(file_path: &PathBuf) -> PathBuf {
-    let candidate = if file_path.is_file() {
+    let candidate = if engine_fs::virtual_fs::is_file(file_path) {
         file_path
             .parent()
             .map(|p| p.to_path_buf())
@@ -20,7 +20,7 @@ fn workspace_from_file(file_path: &PathBuf) -> PathBuf {
 
     let mut current = candidate.as_path();
     loop {
-        if current.join("Cargo.toml").exists() {
+        if engine_fs::virtual_fs::exists(&current.join("Cargo.toml")).unwrap_or(false) {
             return current.to_path_buf();
         }
         if let Some(parent) = current.parent() {

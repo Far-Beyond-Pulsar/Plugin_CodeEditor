@@ -143,7 +143,11 @@ impl TextEditor {
         if hunks == 0 {
             return Ok(json!({ "hunks": 0, "status": "no_change" }));
         }
-        let first_line = view.read(cx).block_line(mockaco_gpui::native::REVIEW_BLOCK_BASE).unwrap_or(0) + 1;
+        let first_line = view
+            .read(cx)
+            .block_line(mockaco_gpui::native::REVIEW_BLOCK_BASE)
+            .unwrap_or(0)
+            + 1;
         self.reveal(path, first_line, 1, cx);
         Ok(json!({
             "hunks": hunks,
@@ -154,7 +158,13 @@ impl TextEditor {
     }
 
     /// Asks the panel that owns this editor to show `path` at a line.
-    fn reveal(&mut self, path: &std::path::Path, line: usize, column: usize, cx: &mut Context<Self>) {
+    fn reveal(
+        &mut self,
+        path: &std::path::Path,
+        line: usize,
+        column: usize,
+        cx: &mut Context<Self>,
+    ) {
         cx.emit(TextEditorEvent::NavigateToLocation {
             path: path.to_path_buf(),
             line: line.saturating_sub(1) as u32,
@@ -187,13 +197,15 @@ mod tests {
         name: &str,
     ) -> (Entity<TextEditor>, PathBuf, &'a mut VisualTestContext) {
         cx.update(|cx| ui::init(cx));
-        let dir = std::env::temp_dir().join(format!("pulsar_ai_tools_{}_{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pulsar_ai_tools_{}_{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sample.rs");
         std::fs::write(&path, SOURCE).unwrap();
         let (_host, vcx) = cx.add_window_view(|_, _| Host);
         let editor = vcx.update(|window, app| {
-            let editor = app.new(|cx| TextEditor::new_with_settings(window, cx, Default::default()));
+            let editor =
+                app.new(|cx| TextEditor::new_with_settings(window, cx, Default::default()));
             editor.update(app, |editor, cx| editor.open_file(path.clone(), window, cx));
             editor
         });
@@ -223,8 +235,13 @@ mod tests {
     #[gpui::test]
     fn tools_read_the_live_buffer_and_selection(cx: &mut TestAppContext) {
         let (_editor, path, cx) = open_editor(cx, "read");
-        let read = run_tool(cx, &path, "code_editor_read", json!({ "start_line": 2, "end_line": 2 }))
-            .unwrap();
+        let read = run_tool(
+            cx,
+            &path,
+            "code_editor_read",
+            json!({ "start_line": 2, "end_line": 2 }),
+        )
+        .unwrap();
         assert_eq!(read["text"], "    2  fn b() {}\n");
         let selection = run_tool(cx, &path, "code_editor_get_selection", json!({})).unwrap();
         assert_eq!(selection["empty"], true);
