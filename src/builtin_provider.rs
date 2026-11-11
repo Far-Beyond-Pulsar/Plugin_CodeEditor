@@ -143,8 +143,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
         tool_name: &str,
         tool_args: JsonValue,
     ) -> Result<JsonValue, PluginError> {
-        crate::ScriptEditorPlugin::default()
-            .execute_ai_tool(file_path, tool_name, tool_args)
+        crate::ScriptEditorPlugin::default().execute_ai_tool(file_path, tool_name, tool_args)
     }
 
     fn create_editor(
@@ -162,9 +161,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
             tracing::warn!("No language server in the editor context; Script Editor LSP is off");
         }
         let settings = plugin_editor_api::EditorSettingsSnapshot::default().with_services(services);
-        let panel = cx.new(|cx| {
-            crate::ScriptEditorPanel::new_with_settings(window, cx, settings)
-        });
+        let panel = cx.new(|cx| crate::ScriptEditorPanel::new_with_settings(window, cx, settings));
         panel.update(cx, |editor, ecx| {
             if let Some(project_root) = project_root {
                 editor.set_project_path(project_root, window, ecx);
