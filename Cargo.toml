@@ -13,6 +13,7 @@ name = "script_editor_plugin"
 builtin = []
 
 [dependencies]
+engine_fs = { workspace = true }
 # The plugin's descriptor and its editor provider's registration.
 pulsar_plugins = { workspace = true }
 plugin_manager = { workspace = true }
@@ -70,3 +71,6 @@ schemars = { version = "1.2", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Headless tests drive real entities in a test window.
 gpui-ce = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

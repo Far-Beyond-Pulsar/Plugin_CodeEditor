@@ -1,18 +1,17 @@
+use engine_fs::virtual_fs as vfs;
 use gpui::{actions, prelude::FluentBuilder, *};
 use rust_i18n::t;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use ui::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, Size, StyledExt,
     button::{Button, ButtonVariants as _},
     context_menu::ContextMenuExt,
     h_flex,
     input::{InputEvent, InputState, TextInput},
     scroll::Scrollbar,
-    v_flex,
+    v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, Size, StyledExt,
 };
 
 // Define actions for context menu
@@ -143,7 +142,7 @@ impl FileExplorer {
 
     fn on_paste_file(&mut self, _: &PasteFile, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(selected) = self.selected_file.clone() {
-            let target_dir = if selected.is_dir() {
+            let target_dir = if vfs::is_dir(&selected) {
                 selected
             } else {
                 selected.parent().unwrap_or(&selected).to_path_buf()
@@ -218,7 +217,7 @@ impl FileExplorer {
     }
 
     pub fn open_project(&mut self, path: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
-        if path.is_dir() {
+        if vfs::is_dir(&path) {
             self.project_root = Some(path.clone());
             self.refresh_file_tree(cx);
             cx.notify();
@@ -284,13 +283,13 @@ impl FileExplorer {
             return;
         } // Prevent infinite recursion
 
-        if let Ok(entries) = fs::read_dir(dir) {
+        if let Ok(entries) = vfs::list_dir(dir) {
             let mut dirs = Vec::new();
             let mut files = Vec::new();
 
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().to_string();
+            for entry in entries {
+                let path = dir.join(&entry.name);
+                let name = entry.name;
 
                 // Skip hidden files and common ignore patterns
                 if name.starts_with('.') || name == "target" || name == "node_modules" {
@@ -300,12 +299,12 @@ impl FileExplorer {
                 let file_entry = FileEntry {
                     name,
                     path: path.clone(),
-                    is_directory: path.is_dir(),
+                    is_directory: entry.is_dir,
                     is_expanded: self.expanded_folders.get(&path).copied().unwrap_or(false),
                     depth,
                 };
 
-                if path.is_dir() {
+                if file_entry.is_directory {
                     dirs.push(file_entry);
                 } else {
                     files.push(file_entry);
@@ -405,7 +404,7 @@ impl FileExplorer {
             let new_path = root.join("new_file.rs");
 
             // Create the file
-            if let Ok(_) = fs::write(&new_path, "") {
+            if let Ok(_) = vfs::write_file(&new_path, b"") {
                 self.refresh_file_tree(cx);
                 self.selected_file = Some(new_path);
                 cx.notify();
@@ -418,7 +417,7 @@ impl FileExplorer {
             let new_path = root.join("new_folder");
 
             // Create the directory
-            if let Ok(_) = fs::create_dir(&new_path) {
+            if let Ok(_) = vfs::create_dir_all(&new_path) {
                 self.refresh_file_tree(cx);
                 cx.notify();
             }
@@ -475,7 +474,7 @@ impl FileExplorer {
 
             match operation {
                 ClipboardOperation::Cut => {
-                    if let Err(e) = fs::rename(source_path, &dest_path) {
+                    if let Err(e) = vfs::rename(source_path, &dest_path) {
                         tracing::error!("Failed to move file: {}", e);
                     } else {
                         tracing::debug!("✓ Moved: {:?} -> {:?}", source_path, dest_path);
@@ -485,7 +484,7 @@ impl FileExplorer {
                     }
                 }
                 ClipboardOperation::Copy => {
-                    if source_path.is_dir() {
+                    if vfs::is_dir(source_path) {
                         // Recursive directory copy
                         if let Err(e) = self.copy_dir_recursive(source_path, &dest_path) {
                             tracing::error!("Failed to copy directory: {}", e);
@@ -498,7 +497,7 @@ impl FileExplorer {
                             self.refresh_file_tree(cx);
                         }
                     } else {
-                        if let Err(e) = fs::copy(source_path, &dest_path) {
+                        if let Err(e) = vfs::copy(source_path, &dest_path) {
                             tracing::error!("Failed to copy file: {}", e);
                         } else {
                             tracing::debug!("✓ Copied: {:?} -> {:?}", source_path, dest_path);
@@ -513,28 +512,22 @@ impl FileExplorer {
     }
 
     fn copy_dir_recursive(&self, src: &Path, dst: &Path) -> std::io::Result<()> {
-        fs::create_dir_all(dst)?;
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
-            let path = entry.path();
-            let file_name = entry.file_name();
-            let dest_path = dst.join(file_name);
+        vfs::create_dir_all(dst).map_err(std::io::Error::other)?;
+        for entry in vfs::list_dir(src).map_err(std::io::Error::other)? {
+            let path = src.join(&entry.name);
+            let dest_path = dst.join(&entry.name);
 
-            if path.is_dir() {
+            if entry.is_dir {
                 self.copy_dir_recursive(&path, &dest_path)?;
             } else {
-                fs::copy(&path, &dest_path)?;
+                vfs::copy(&path, &dest_path).map_err(std::io::Error::other)?;
             }
         }
         Ok(())
     }
 
     fn delete_file(&mut self, path: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
-        let result = if path.is_dir() {
-            fs::remove_dir_all(&path)
-        } else {
-            fs::remove_file(&path)
-        };
+        let result = vfs::delete_path(&path);
 
         match result {
             Ok(_) => {
@@ -550,7 +543,7 @@ impl FileExplorer {
 
     fn start_rename(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         // Bail out gracefully when the entry vanished before the action ran
-        if !path.exists() {
+        if !vfs::exists(&path).unwrap_or(false) {
             tracing::warn!("⚠️ Rename aborted, path no longer exists: {:?}", path);
             self.finish_rename_session(cx);
             return;
@@ -638,13 +631,13 @@ impl FileExplorer {
             return;
         }
 
-        let was_directory = old_path.is_dir();
+        let was_directory = vfs::is_dir(&old_path);
         let new_path = match old_path.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => parent.join(&new_name),
             _ => PathBuf::from(&new_name),
         };
 
-        match fs::rename(&old_path, &new_path) {
+        match vfs::rename(&old_path, &new_path) {
             Ok(_) => {
                 tracing::debug!("✓ Renamed: {:?} -> {:?}", old_path, new_path);
                 if was_directory {
@@ -769,7 +762,7 @@ impl FileExplorer {
         let new_path = dir_path.join("new_file.txt");
 
         // Create the file
-        if let Ok(_) = fs::write(&new_path, "") {
+        if let Ok(_) = vfs::write_file(&new_path, b"") {
             self.refresh_file_tree(cx);
             self.selected_file = Some(new_path.clone());
             self.start_rename(new_path, _window, cx);
@@ -785,7 +778,7 @@ impl FileExplorer {
         let new_path = dir_path.join("new_folder");
 
         // Create the directory
-        if let Ok(_) = fs::create_dir(&new_path) {
+        if let Ok(_) = vfs::create_dir_all(&new_path) {
             self.refresh_file_tree(cx);
             self.selected_file = Some(new_path.clone());
             self.start_rename(new_path, _window, cx);
@@ -901,7 +894,7 @@ impl FileExplorer {
                 style: gpui::FontStyle::Normal,
                 features: gpui::FontFeatures::default(),
                 fallbacks: Some(gpui::FontFallbacks::from_fonts(vec![
-                    "monospace".to_string(),
+                    "monospace".to_string()
                 ])),
             })
             .child(

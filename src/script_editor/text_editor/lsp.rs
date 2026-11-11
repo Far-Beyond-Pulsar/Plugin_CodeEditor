@@ -22,7 +22,9 @@ use engine_backend::services::rust_analyzer_manager::{
 };
 use gpui::*;
 use mockaco_core::{DiagnosticSeverity, TextPosition};
-use mockaco_gpui::intel::{CompletionEntry, CompletionKind, DiagnosticInput, HoverContent, PositionEdit};
+use mockaco_gpui::intel::{
+    CompletionEntry, CompletionKind, DiagnosticInput, HoverContent, PositionEdit,
+};
 use mockaco_gpui::native::{EditorEvent, LspRequest, WgpuiEditorView};
 use mockaco_gpui::{PendingSync, TextChange};
 use serde_json::{json, Value};
@@ -196,7 +198,11 @@ impl TextEditor {
                     }
                 }
                 Err(error) => {
-                    tracing::debug!("rust-analyzer not ready for {:?}: {}", path.file_name(), error)
+                    tracing::debug!(
+                        "rust-analyzer not ready for {:?}: {}",
+                        path.file_name(),
+                        error
+                    )
                 }
             }
         }
@@ -283,7 +289,12 @@ impl TextEditor {
 
     // ---- requests from the view ------------------------------------------
 
-    pub(super) fn on_lsp_event(&mut self, index: usize, event: &EditorEvent, cx: &mut Context<Self>) {
+    pub(super) fn on_lsp_event(
+        &mut self,
+        index: usize,
+        event: &EditorEvent,
+        cx: &mut Context<Self>,
+    ) {
         match event {
             EditorEvent::HoverRequested(request) => self.lsp_hover(index, *request, cx),
             EditorEvent::CompletionRequested { request, trigger } => {
@@ -346,7 +357,8 @@ impl TextEditor {
                 request.position.column,
                 raw.chars().take(300).collect::<String>()
             );
-            let content = hover_markdown(&response).map(|markdown| HoverContent::from_markdown(&markdown, None));
+            let content = hover_markdown(&response)
+                .map(|markdown| HoverContent::from_markdown(&markdown, None));
             let _ = view.update(cx, |view, cx| {
                 view.show_hover(request.id, request.version, content, cx)
             });
@@ -373,7 +385,9 @@ impl TextEditor {
         // Only the characters the server registered go as trigger characters;
         // the rest (space, comma, brackets...) are ordinary invocations.
         params["context"] = match trigger.filter(|c| server_triggers.contains(c)) {
-            Some(character) => json!({ "triggerKind": 2, "triggerCharacter": character.to_string() }),
+            Some(character) => {
+                json!({ "triggerKind": 2, "triggerCharacter": character.to_string() })
+            }
             None => json!({ "triggerKind": 1 }),
         };
         let Ok(first) = analyzer
@@ -460,7 +474,12 @@ impl TextEditor {
             .as_ref()
             .and_then(|client| client.completions.as_ref())
             .filter(|store| store.request == request)
-            .and_then(|store| store.items.get((host_data as usize).wrapping_sub(1)).cloned())
+            .and_then(|store| {
+                store
+                    .items
+                    .get((host_data as usize).wrapping_sub(1))
+                    .cloned()
+            })
         else {
             return;
         };
@@ -784,7 +803,7 @@ impl TextEditor {
                     .unwrap_or_default(),
                 None => disk
                     .entry(item.path.clone())
-                    .or_insert_with(|| std::fs::read_to_string(&item.path).ok())
+                    .or_insert_with(|| engine_fs::virtual_fs::read_to_string(&item.path).ok())
                     .as_deref()
                     .and_then(|text| text.lines().nth(item.line as usize))
                     .map(|line| line.trim().to_owned())
@@ -808,17 +827,25 @@ impl TextEditor {
         let Ok((_, _, view, _)) = self.lsp_target_for(path, cx) else {
             return;
         };
-        let lines = view.read(cx).surface.editor().selections().primary().and_then(|selection| {
-            let range = selection.ordered_range();
-            if range.is_empty() {
-                return None;
-            }
-            let text = view.read(cx).surface.document().text().clone();
-            let first = text.byte_to_line(range.start).ok()?;
-            // A selection ending at a line's start does not take that line.
-            let last = text.byte_to_line(range.end.saturating_sub(1).max(range.start)).ok()?;
-            Some(first..=last)
-        });
+        let lines = view
+            .read(cx)
+            .surface
+            .editor()
+            .selections()
+            .primary()
+            .and_then(|selection| {
+                let range = selection.ordered_range();
+                if range.is_empty() {
+                    return None;
+                }
+                let text = view.read(cx).surface.document().text().clone();
+                let first = text.byte_to_line(range.start).ok()?;
+                // A selection ending at a line's start does not take that line.
+                let last = text
+                    .byte_to_line(range.end.saturating_sub(1).max(range.start))
+                    .ok()?;
+                Some(first..=last)
+            });
         self.format_lines(path, lines, cx);
     }
 
@@ -966,10 +993,13 @@ impl TextEditor {
                 .join(format!("{}.rs", sanitize_file_name(&name)));
             let written = file
                 .parent()
-                .map(std::fs::create_dir_all)
+                .map(engine_fs::virtual_fs::create_dir_all)
                 .unwrap_or(Ok(()))
                 .and_then(|_| {
-                    std::fs::write(&file, format!("// Expansion of {name}!\n{expansion}\n"))
+                    engine_fs::virtual_fs::write_file(
+                        &file,
+                        format!("// Expansion of {name}!\n{expansion}\n").as_bytes(),
+                    )
                 });
             if let Err(error) = written {
                 tracing::warn!("Could not write the expansion of {name}: {error}");
@@ -1142,7 +1172,10 @@ fn first_location(result: &Value) -> Option<(String, u32, u32)> {
         Value::Object(_) => result,
         _ => return None,
     };
-    let uri = item.get("targetUri").or_else(|| item.get("uri"))?.as_str()?;
+    let uri = item
+        .get("targetUri")
+        .or_else(|| item.get("uri"))?
+        .as_str()?;
     let range = item
         .get("targetSelectionRange")
         .or_else(|| item.get("range"))?;
@@ -1352,9 +1385,8 @@ fn completion_entry(item: &Value, host_data: u64) -> Option<CompletionEntry> {
     let label = item.get("label")?.as_str()?;
     let mut entry = CompletionEntry::new(label);
     entry.host_data = host_data;
-    entry.kind = CompletionKind::from_lsp(
-        item.get("kind").and_then(Value::as_u64).unwrap_or(1) as u32,
-    );
+    entry.kind =
+        CompletionKind::from_lsp(item.get("kind").and_then(Value::as_u64).unwrap_or(1) as u32);
     entry.detail = item
         .get("detail")
         .and_then(Value::as_str)
@@ -1386,8 +1418,14 @@ fn completion_entry(item: &Value, host_data: u64) -> Option<CompletionEntry> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    entry.preselect = item.get("preselect").and_then(Value::as_bool).unwrap_or(false);
-    entry.deprecated = item.get("deprecated").and_then(Value::as_bool).unwrap_or(false)
+    entry.preselect = item
+        .get("preselect")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    entry.deprecated = item
+        .get("deprecated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
         || item
             .get("tags")
             .and_then(Value::as_array)
@@ -1412,15 +1450,14 @@ mod tests {
         }
     }
 
-    fn status_of(
-        settings: EditorSettingsSnapshot,
-        cx: &mut TestAppContext,
-    ) -> (bool, String) {
+    fn status_of(settings: EditorSettingsSnapshot, cx: &mut TestAppContext) -> (bool, String) {
         let (_host, cx) = cx.add_window_view(|_, _| Host);
         let editor = cx.update(|window, app| {
             app.new(|cx| TextEditor::new_with_settings(window, cx, settings))
         });
-        editor.read_with(cx, |editor, cx| (editor.lsp.is_some(), editor.lsp_status(cx)))
+        editor.read_with(cx, |editor, cx| {
+            (editor.lsp.is_some(), editor.lsp_status(cx))
+        })
     }
 
     /// The regression this module exists for: an editor that was handed a
@@ -1435,26 +1472,43 @@ mod tests {
         });
         let (attached, status) = status_of(settings, cx);
         assert!(attached, "the handle in the context was ignored");
-        assert!(status.starts_with("rust-analyzer:"), "unexpected status: {status}");
+        assert!(
+            status.starts_with("rust-analyzer:"),
+            "unexpected status: {status}"
+        );
     }
 
     #[gpui::test]
     fn an_editor_without_a_language_server_says_so(cx: &mut TestAppContext) {
         let (attached, status) = status_of(EditorSettingsSnapshot::default(), cx);
         assert!(!attached);
-        assert!(status.contains("not attached"), "unexpected status: {status}");
+        assert!(
+            status.contains("not attached"),
+            "unexpected status: {status}"
+        );
     }
 
     #[test]
     fn hover_contents_come_in_every_lsp_shape() {
         let markup = json!({ "result": { "contents": { "kind": "markdown", "value": "docs" } } });
         assert_eq!(hover_markdown(&markup).as_deref(), Some("docs"));
-        let marked_string = json!({ "result": { "contents": { "language": "rust", "value": "fn a()" } } });
-        assert_eq!(hover_markdown(&marked_string).as_deref(), Some("```rust\nfn a()\n```"));
-        let array = json!({ "result": { "contents": ["a", { "language": "rust", "value": "b" }] } });
-        assert_eq!(hover_markdown(&array).as_deref(), Some("a\n\n```rust\nb\n```"));
+        let marked_string =
+            json!({ "result": { "contents": { "language": "rust", "value": "fn a()" } } });
+        assert_eq!(
+            hover_markdown(&marked_string).as_deref(),
+            Some("```rust\nfn a()\n```")
+        );
+        let array =
+            json!({ "result": { "contents": ["a", { "language": "rust", "value": "b" }] } });
+        assert_eq!(
+            hover_markdown(&array).as_deref(),
+            Some("a\n\n```rust\nb\n```")
+        );
         assert_eq!(hover_markdown(&json!({ "result": null })), None);
-        assert_eq!(hover_markdown(&json!({ "result": { "contents": "  " } })), None);
+        assert_eq!(
+            hover_markdown(&json!({ "result": { "contents": "  " } })),
+            None
+        );
     }
 
     #[test]
@@ -1503,15 +1557,30 @@ mod tests {
     #[test]
     fn format_selection_keeps_the_edits_within_its_lines() {
         let edit = |start: (usize, usize), end: (usize, usize)| PositionEdit {
-            start: TextPosition { line: start.0, column: start.1 },
-            end: TextPosition { line: end.0, column: end.1 },
+            start: TextPosition {
+                line: start.0,
+                column: start.1,
+            },
+            end: TextPosition {
+                line: end.0,
+                column: end.1,
+            },
             new_text: String::new(),
         };
         let lines = 3..=5;
         assert!(edit_within_lines(&edit((3, 0), (3, 4)), &lines));
-        assert!(edit_within_lines(&edit((5, 2), (6, 0)), &lines), "the last line's end");
-        assert!(!edit_within_lines(&edit((2, 9), (3, 0)), &lines), "starts above");
-        assert!(!edit_within_lines(&edit((5, 0), (6, 1)), &lines), "reaches below");
+        assert!(
+            edit_within_lines(&edit((5, 2), (6, 0)), &lines),
+            "the last line's end"
+        );
+        assert!(
+            !edit_within_lines(&edit((2, 9), (3, 0)), &lines),
+            "starts above"
+        );
+        assert!(
+            !edit_within_lines(&edit((5, 0), (6, 1)), &lines),
+            "reaches below"
+        );
         assert!(!edit_within_lines(&edit((7, 0), (7, 1)), &lines));
     }
 
@@ -1573,7 +1642,10 @@ mod tests {
     #[test]
     fn definition_results_resolve_to_a_target() {
         let location = json!({ "uri": "file:///a.rs", "range": { "start": { "line": 3, "character": 4 }, "end": {} } });
-        assert_eq!(first_location(&location), Some(("file:///a.rs".into(), 3, 4)));
+        assert_eq!(
+            first_location(&location),
+            Some(("file:///a.rs".into(), 3, 4))
+        );
         let link = json!([{ "targetUri": "file:///b.rs", "targetRange": {},
             "targetSelectionRange": { "start": { "line": 9, "character": 1 }, "end": {} } }]);
         assert_eq!(first_location(&link), Some(("file:///b.rs".into(), 9, 1)));

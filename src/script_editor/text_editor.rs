@@ -14,12 +14,14 @@ mod buffer_tools;
 mod lsp;
 
 use super::ai::tools::{self as ai_tools, BufferRequest};
+use engine_fs::virtual_fs as vfs;
 use gpui::*;
 use mockaco_diff::DiffRowKind;
 use mockaco_gpui::native::{EditorEvent, WgpuiEditorView};
-use mockaco_gpui::{DiffSplitSurface, EditorSurface, Language, SurfaceColor, SurfaceGeometry, SurfaceTheme};
+use mockaco_gpui::{
+    DiffSplitSurface, EditorSurface, Language, SurfaceColor, SurfaceGeometry, SurfaceTheme,
+};
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
 use ui::ActiveTheme as _;
 
@@ -254,7 +256,7 @@ impl TextEditor {
             return;
         }
 
-        let content = match fs::read_to_string(&path) {
+        let content = match vfs::read_to_string(&path) {
             Ok(content) => content,
             Err(error) => {
                 tracing::warn!("Could not read {:?}: {}", path, error);
@@ -308,7 +310,11 @@ impl TextEditor {
 
         let tint = {
             let theme = cx.theme();
-            let base = if diff_removed { theme.danger } else { theme.success };
+            let base = if diff_removed {
+                theme.danger
+            } else {
+                theme.success
+            };
             with_alpha(surface_color_from_hsla(base), 115)
         };
         let backgrounds: HashMap<usize, SurfaceColor> =
@@ -337,7 +343,7 @@ impl TextEditor {
         };
         let path = file.path.clone();
         let content = file.view.read(cx).text();
-        match fs::write(&path, &content) {
+        match vfs::write_file(&path, content.as_bytes()) {
             Ok(()) => {
                 self.open_files[index].is_modified = false;
                 self.lsp_saved(index, &content, cx);
@@ -540,7 +546,7 @@ impl TextEditor {
 /// comments, strings, numbers) so highlighting and folding have real work.
 fn write_stress_file(path: &std::path::Path, target_lines: usize) -> std::io::Result<()> {
     use std::io::Write;
-    let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
+    let mut out: Vec<u8> = Vec::with_capacity(1 << 20);
     let mut lines = 0usize;
     let mut module = 0usize;
     writeln!(out, "//! Generated stress file: {target_lines} lines.\n")?;
@@ -629,7 +635,7 @@ pub mod module_{m} {{
         out.write_all(chunk.as_bytes())?;
         lines += chunk.bytes().filter(|b| *b == b'\n').count();
     }
-    out.flush()
+    vfs::write_file(path, &out).map_err(std::io::Error::other)
 }
 
 fn surface_color_from_hsla(color: Hsla) -> SurfaceColor {
@@ -671,9 +677,18 @@ const SYNTAX_MAP: &[(&str, &[&str])] = &[
     ("variable.parameter", &["variable"]),
     ("variable.builtin", &["variable.special", "variable"]),
     ("operator", &["operator"]),
-    ("punctuation.bracket", &["punctuation.bracket", "punctuation"]),
-    ("punctuation.delimiter", &["punctuation.delimiter", "punctuation"]),
-    ("punctuation.list_marker", &["punctuation.list_marker", "punctuation"]),
+    (
+        "punctuation.bracket",
+        &["punctuation.bracket", "punctuation"],
+    ),
+    (
+        "punctuation.delimiter",
+        &["punctuation.delimiter", "punctuation"],
+    ),
+    (
+        "punctuation.list_marker",
+        &["punctuation.list_marker", "punctuation"],
+    ),
     ("label", &["label"]),
     ("tag", &["tag"]),
     ("title", &["title"]),
@@ -705,7 +720,9 @@ fn syntax_theme(theme: &ui::Theme) -> mockaco_language::Theme {
                     },
                     background: None,
                     font: mockaco_language::FontStyle {
-                        bold: style.font_weight.is_some_and(|weight| weight >= FontWeight::SEMIBOLD),
+                        bold: style
+                            .font_weight
+                            .is_some_and(|weight| weight >= FontWeight::SEMIBOLD),
                         italic: matches!(style.font_style, Some(FontStyle::Italic)),
                         underline: false,
                     },
