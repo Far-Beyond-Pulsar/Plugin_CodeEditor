@@ -211,12 +211,6 @@ impl EditorPluginComponents for ScriptEditorPlugin {
         Vec::new()
     }
 }
-impl EditorPluginSubsystems for ScriptEditorPlugin {
-    fn subsystems(&self) -> Vec<Box<dyn Subsystem>> {
-        Vec::new()
-    }
-}
-
 // Static built-ins are instantiated through the Rust API and must not emit the
 // process-global dynamic loader symbols shared by every plugin.
 #[cfg(not(feature = "builtin"))]
