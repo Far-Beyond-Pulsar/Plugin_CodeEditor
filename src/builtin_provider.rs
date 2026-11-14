@@ -31,6 +31,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
                 structure: FileStructure::Standalone,
                 default_content: json!("// New Rust script\n"),
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
 
                 categories: vec!["Scripts".to_string()],
             },
@@ -43,6 +44,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
                 structure: FileStructure::Standalone,
                 default_content: json!("// New JavaScript file\n"),
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
 
                 categories: vec!["Scripts".to_string()],
             },
@@ -55,6 +57,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
                 structure: FileStructure::Standalone,
                 default_content: json!("// New TypeScript file\n"),
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
 
                 categories: vec!["Scripts".to_string()],
             },
@@ -67,6 +70,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
                 structure: FileStructure::Standalone,
                 default_content: json!("# New Python script\n"),
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
 
                 categories: vec!["Scripts".to_string()],
             },
@@ -79,6 +83,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
                 structure: FileStructure::Standalone,
                 default_content: json!("-- New Lua script\n"),
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
 
                 categories: vec!["Scripts".to_string()],
             },
@@ -91,6 +96,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
                 structure: FileStructure::Standalone,
                 default_content: json!("# TOML configuration file\n"),
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
 
                 categories: vec!["Data".to_string()],
             },
@@ -103,6 +109,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
                 structure: FileStructure::Standalone,
                 default_content: json!("# New Document\n"),
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
 
                 categories: vec!["Documents".to_string()],
             },
