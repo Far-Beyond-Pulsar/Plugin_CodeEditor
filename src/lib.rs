@@ -28,6 +28,7 @@ use ui::dock::PanelView;
 
 // Script Editor modules
 mod script_editor;
+mod examples;
 
 // Re-export main types
 pub use script_editor::{
@@ -223,6 +224,7 @@ pulsar_plugins::installed!("pulsar-plugin.toml", build);
 /// feature).
 #[cfg_attr(not(feature = "builtin"), allow(unused_variables))]
 pub fn build(p: &mut pulsar_plugins::PluginBuilder) {
+    examples::build(p);
     #[cfg(feature = "builtin")]
     builtin_provider::build(p);
 }

@@ -1,0 +1,32 @@
+# An example project configuration: tables, arrays, inline tables and dates.
+
+[project]
+name = "Example Game"
+version = "0.3.1"
+authors = ["Ada Example", "Lin Sample"]
+created = 2026-01-15
+
+# Which features the project turns on.
+[features]
+shadows = true
+ray_tracing = false
+max_lights = 256
+
+# Quality presets: an array of tables, one per preset.
+[[quality]]
+name = "low"
+resolution_scale = 0.5
+shadow_map_size = 1024
+
+[[quality]]
+name = "high"
+resolution_scale = 1.0
+shadow_map_size = 4096
+
+# An inline table and an array of arrays.
+[window]
+size = { width = 1920, height = 1080 }
+cursor_hotspot = [[0, 0], [8, 8]]
+title = """
+Example Game
+Preview build"""
