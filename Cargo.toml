@@ -18,7 +18,7 @@ engine_fs = { workspace = true }
 pulsar_plugins = { workspace = true }
 plugin_manager = { workspace = true }
 # Plugin API
-plugin_editor_api = { workspace = true }
+plugin_editor_api = { workspace = true, features = ["editor"] }
 
 # UI dependencies. Path deps into the monorepo checkouts so this standalone
 # plugin resolves the exact same gpui-ce / ui sources the rest of the
