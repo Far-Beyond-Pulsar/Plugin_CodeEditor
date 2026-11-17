@@ -22,13 +22,11 @@ rust_i18n::i18n!("locales", fallback = "en");
 use gpui::*;
 use plugin_editor_api::*;
 use serde_json::json;
-use std::path::PathBuf;
 use std::sync::Arc;
-use ui::dock::PanelView;
 
 // Script Editor modules
-mod script_editor;
 mod examples;
+mod script_editor;
 
 // Re-export main types
 pub use script_editor::{

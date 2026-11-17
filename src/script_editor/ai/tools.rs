@@ -133,7 +133,9 @@ fn target(ctx: &ToolContext, args: &Value) -> Result<PathBuf> {
             return Ok(path.clone());
         }
     }
-    let map = senders().lock().map_err(|_| anyhow!("The editor registry is unavailable."))?;
+    let map = senders()
+        .lock()
+        .map_err(|_| anyhow!("The editor registry is unavailable."))?;
     let mut paths = map.values().map(|(path, _)| path);
     match (paths.next(), paths.next()) {
         (Some(only), None) => Ok(only.clone()),
@@ -374,12 +376,15 @@ pub fn execute_ai_tool(
 
 // ---- UI-thread side -----------------------------------------------------------
 
-
 /// Numbered lines `start..=end` (1-based) of `text`.
 pub(crate) fn read_lines(text: &str, start: Option<usize>, end: Option<usize>) -> Value {
     let lines: Vec<&str> = text.split('\n').collect();
     // A final newline is not a line of its own.
-    let total = if text.ends_with('\n') { lines.len() - 1 } else { lines.len() };
+    let total = if text.ends_with('\n') {
+        lines.len() - 1
+    } else {
+        lines.len()
+    };
     let start = start.unwrap_or(1).max(1);
     let end = end.unwrap_or(total).min(total);
     let capped = end.min(start.saturating_add(MAX_READ_LINES - 1));
@@ -477,9 +482,15 @@ mod tests {
     fn line_edits_replace_insert_and_reject_bad_ranges() {
         let text = "a\nb\nc\n";
         assert_eq!(apply_line_edit(text, 2, 2, "B").unwrap(), "a\nB\nc\n");
-        assert_eq!(apply_line_edit(text, 2, 3, "x\ny\nz").unwrap(), "a\nx\ny\nz\n");
+        assert_eq!(
+            apply_line_edit(text, 2, 3, "x\ny\nz").unwrap(),
+            "a\nx\ny\nz\n"
+        );
         // Insert before line 2 (end_line = start_line - 1).
-        assert_eq!(apply_line_edit(text, 2, 1, "new").unwrap(), "a\nnew\nb\nc\n");
+        assert_eq!(
+            apply_line_edit(text, 2, 1, "new").unwrap(),
+            "a\nnew\nb\nc\n"
+        );
         // Append after the last line.
         assert_eq!(apply_line_edit(text, 4, 3, "d").unwrap(), "a\nb\nc\nd\n");
         // Delete.
@@ -520,7 +531,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("not open"), "{error}");
-        assert!(ai_tools().iter().any(|tool| tool.name == "code_editor_propose_edit"));
+        assert!(ai_tools()
+            .iter()
+            .any(|tool| tool.name == "code_editor_propose_edit"));
         assert!(capabilities_for_file(Path::new("x.rs")).len() >= 7);
         assert!(capabilities_for_file(Path::new("x.png")).is_empty());
     }
