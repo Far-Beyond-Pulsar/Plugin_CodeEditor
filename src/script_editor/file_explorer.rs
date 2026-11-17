@@ -47,7 +47,6 @@ struct NewFolderHere {
 pub enum ClipboardOperation {
     Cut,
     Copy,
-    Paste,
 }
 
 #[derive(Clone)]
@@ -95,7 +94,7 @@ pub struct FileExplorer {
 }
 
 impl FileExplorer {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Escape cancels an active inline rename (the input's own escape handler propagates here)
         cx.bind_keys([KeyBinding::new(
             "escape",
@@ -241,7 +240,7 @@ impl FileExplorer {
     fn rebuild_visible_entries(&mut self) {
         self.visible_entries.clear();
 
-        for (idx, entry) in self.file_tree.iter().enumerate() {
+        for (idx, _entry) in self.file_tree.iter().enumerate() {
             // Check if this entry should be visible based on parent expansion
             if self.is_entry_visible(idx) {
                 self.visible_entries.push(idx);
@@ -505,7 +504,6 @@ impl FileExplorer {
                         }
                     }
                 }
-                ClipboardOperation::Paste => {}
             }
         }
         cx.notify();

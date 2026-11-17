@@ -1,13 +1,9 @@
 pub mod ai;
-mod autocomplete_integration;
 mod file_explorer;
-pub mod languages;
 pub mod text_editor;
 mod workspace_panels;
 
-pub use autocomplete_integration::*;
 pub use file_explorer::FileExplorer;
-pub use languages::*;
 pub use text_editor::{TextEditor, TextEditorEvent};
 pub use workspace_panels::*;
 
@@ -17,14 +13,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use ui::{
-    ActiveTheme, Disableable as _, Sizable as _, StyledExt,
     button::{Button, ButtonVariants as _},
-    dock::{
-        DockArea, DockChannel, DockItem, Panel, PanelEvent, PanelStyle, PanelView, TabPanel,
-    },
+    dock::{DockArea, DockChannel, DockItem, Panel, PanelEvent, PanelStyle, PanelView, TabPanel},
     h_flex,
-    resizable::{ResizableState, h_resizable, resizable_panel},
-    v_flex,
+    resizable::{h_resizable, resizable_panel, ResizableState},
+    v_flex, ActiveTheme, Disableable as _, Sizable as _, StyledExt,
 };
 
 use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
@@ -202,7 +195,10 @@ impl ScriptEditor {
     /// A new tab joins the group of the file that was current, so a split
     /// keeps receiving files where the user is working.
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let existing = self.file_panels.get(&path).and_then(|panel| panel.upgrade());
+        let existing = self
+            .file_panels
+            .get(&path)
+            .and_then(|panel| panel.upgrade());
         let target = self.target_tab_panel(cx);
 
         self.text_editor.update(cx, |editor, cx| {
@@ -326,7 +322,11 @@ impl ScriptEditor {
         let Some(path) = self.text_editor.read(cx).current_file_path() else {
             return;
         };
-        let Some(panel) = self.file_panels.get(&path).and_then(|panel| panel.upgrade()) else {
+        let Some(panel) = self
+            .file_panels
+            .get(&path)
+            .and_then(|panel| panel.upgrade())
+        else {
             return;
         };
         if self.text_editor.read(cx).is_modified(&path) {
@@ -682,8 +682,9 @@ impl ScriptEditor {
                             .small()
                             .disabled(generating)
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.text_editor
-                                    .update(cx, |editor, cx| editor.generate_stress_file(window, cx));
+                                this.text_editor.update(cx, |editor, cx| {
+                                    editor.generate_stress_file(window, cx)
+                                });
                             })),
                     )
                     .child(
@@ -742,7 +743,11 @@ impl ScriptEditor {
                 EditorMenu::new("Go")
                     .action_if("Go to Line…", EditorGoToLine, open)
                     .action_if("Go to Symbol in File…", EditorGoToSymbol, open)
-                    .action_if("Go to Symbol in Workspace…", EditorGoToWorkspaceSymbol, open)
+                    .action_if(
+                        "Go to Symbol in Workspace…",
+                        EditorGoToWorkspaceSymbol,
+                        open,
+                    )
                     .separator()
                     .action_if("Go to Definition", EditorGoToDefinition, open)
                     .action_if("Go to References", EditorGoToReferences, open)
@@ -810,7 +815,11 @@ impl Render for ScriptEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The editors render nothing themselves, so they pick up a theme
         // change here.
-        for editor in [&self.text_editor, &self.diff_before_editor, &self.diff_editor] {
+        for editor in [
+            &self.text_editor,
+            &self.diff_before_editor,
+            &self.diff_editor,
+        ] {
             editor.update(cx, |editor, cx| editor.apply_theme(cx));
         }
 

@@ -1,10 +1,9 @@
 //! Dock panels for the Script Editor.
 
 use super::ai::{AssistKind, InlineAssist, InlineAssistEvent};
-use super::file_explorer::FileExplorer;
 use super::text_editor::{
-    EditorAiAsk, EditorAiDocument, EditorAiEdit, EditorAiExplain, EditorAiFix, EditorAiTests,
-    EditorAddCursorAbove, EditorAddCursorBelow, EditorAddNextOccurrence, EditorCloseBar,
+    EditorAddCursorAbove, EditorAddCursorBelow, EditorAddNextOccurrence, EditorAiAsk,
+    EditorAiDocument, EditorAiEdit, EditorAiExplain, EditorAiFix, EditorAiTests, EditorCloseBar,
     EditorCopy, EditorCopyPath, EditorCut, EditorExpandMacro, EditorFind, EditorFindNext,
     EditorFindPrevious, EditorFormatDocument, EditorFormatSelection, EditorGenerateStressFile,
     EditorGoToDefinition, EditorGoToLine, EditorGoToParentModule, EditorGoToReferences,
@@ -17,7 +16,6 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use mockaco_core::{CaseSensitivity, SearchQuery};
 use mockaco_gpui::native::{EditorEvent, WgpuiEditorView};
-use rust_i18n::t;
 use std::path::PathBuf;
 use ui::{
     button::{Button, ButtonVariants as _},
@@ -175,15 +173,18 @@ impl FilePanel {
         if let Some((assist, _)) = self.assist.take() {
             assist.update(cx, |assist, cx| assist.close(cx));
         }
-        let assist = InlineAssist::open(self.view.clone(), self.path.clone(), kind, None, window, cx);
-        let subscription = cx.subscribe(&assist, |this, _, event: &InlineAssistEvent, cx| {
-            match event {
-                InlineAssistEvent::Closed => {
-                    this.assist = None;
-                    cx.notify();
-                }
-            }
-        });
+        let assist =
+            InlineAssist::open(self.view.clone(), self.path.clone(), kind, None, window, cx);
+        let subscription =
+            cx.subscribe(
+                &assist,
+                |this, _, event: &InlineAssistEvent, cx| match event {
+                    InlineAssistEvent::Closed => {
+                        this.assist = None;
+                        cx.notify();
+                    }
+                },
+            );
         self.assist = Some((assist, subscription));
         cx.notify();
     }
@@ -434,7 +435,9 @@ impl FilePanel {
     fn open_workspace_symbols(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let seed = self.selected_text(cx).unwrap_or_default();
         self.open_location_bar(true, Some(seed.clone()), window, cx);
-        self.with_editor(cx, |editor, path, cx| editor.workspace_symbols(path, &seed, cx));
+        self.with_editor(cx, |editor, path, cx| {
+            editor.workspace_symbols(path, &seed, cx)
+        });
         cx.notify();
     }
 
@@ -821,7 +824,8 @@ impl Render for FilePanel {
                 this.with_editor(cx, |editor, path, cx| editor.format_selection(path, cx))
             }))
             .on_action(cx.listener(|this, _: &EditorAddNextOccurrence, _, cx| {
-                this.view.update(cx, |view, cx| view.add_next_occurrence(cx));
+                this.view
+                    .update(cx, |view, cx| view.add_next_occurrence(cx));
             }))
             .on_action(cx.listener(|this, _: &EditorAiEdit, window, cx| {
                 this.open_assist(AssistKind::Edit, window, cx)
@@ -870,9 +874,11 @@ impl Render for FilePanel {
             .on_action(cx.listener(|this, _: &EditorGoToSymbol, window, cx| {
                 this.open_locations(TextEditor::document_symbols, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &EditorGoToWorkspaceSymbol, window, cx| {
-                this.open_workspace_symbols(window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &EditorGoToWorkspaceSymbol, window, cx| {
+                    this.open_workspace_symbols(window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &EditorGoToParentModule, _, cx| {
                 this.with_editor(cx, |editor, path, cx| editor.go_to_parent_module(path, cx))
             }))
@@ -972,102 +978,6 @@ impl Panel for FilePanel {
         self.text_editor
             .update(cx, |editor, cx| editor.activate_path(&path, cx))
             .ok();
-    }
-}
-
-/// Welcome Panel - shown when no files are open
-pub struct WelcomePanelWrapper {
-    focus_handle: FocusHandle,
-}
-
-impl WelcomePanelWrapper {
-    pub fn new(cx: &mut Context<Self>) -> Self {
-        Self {
-            focus_handle: cx.focus_handle(),
-        }
-    }
-}
-
-impl EventEmitter<PanelEvent> for WelcomePanelWrapper {}
-
-impl Render for WelcomePanelWrapper {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap_4()
-            .child(
-                div()
-                    .text_xl()
-                    .font_weight(gpui::FontWeight::BOLD)
-                    .text_color(cx.theme().foreground)
-                    .child(t!("CodeEditor.Welcome").to_string()),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("CodeEditor.OpenFileHint").to_string()),
-            )
-    }
-}
-
-impl Focusable for WelcomePanelWrapper {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl Panel for WelcomePanelWrapper {
-    fn panel_name(&self) -> &'static str {
-        "welcome"
-    }
-
-    fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
-        "Welcome".into_any_element()
-    }
-}
-
-/// File Explorer Panel
-pub struct FileExplorerPanel {
-    file_explorer: Entity<FileExplorer>,
-    focus_handle: FocusHandle,
-}
-
-impl FileExplorerPanel {
-    pub fn new(file_explorer: Entity<FileExplorer>, cx: &mut Context<Self>) -> Self {
-        Self {
-            file_explorer,
-            focus_handle: cx.focus_handle(),
-        }
-    }
-}
-
-impl EventEmitter<PanelEvent> for FileExplorerPanel {}
-
-impl Render for FileExplorerPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .size_full()
-            .bg(cx.theme().sidebar)
-            .child(self.file_explorer.clone())
-    }
-}
-
-impl Focusable for FileExplorerPanel {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl Panel for FileExplorerPanel {
-    fn panel_name(&self) -> &'static str {
-        "file_explorer"
-    }
-
-    fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
-        "Files".into_any_element()
     }
 }
 
@@ -1194,11 +1104,19 @@ mod tests {
         assert_eq!(status(cx).map(|(_, total)| total), Some(3));
         cx.simulate_keystrokes("alt-w");
         assert_eq!(switches(cx), (false, true, false));
-        assert_eq!(status(cx).map(|(_, total)| total), Some(3), "a is a word each time");
+        assert_eq!(
+            status(cx).map(|(_, total)| total),
+            Some(3),
+            "a is a word each time"
+        );
         cx.simulate_keystrokes("alt-w alt-r");
         assert_eq!(switches(cx), (false, false, true));
         type_into_bar(cx, r"\w\(\)");
-        assert_eq!(status(cx).map(|(_, total)| total), Some(4), "a(), b(), a(), a()");
+        assert_eq!(
+            status(cx).map(|(_, total)| total),
+            Some(4),
+            "a(), b(), a(), a()"
+        );
         type_into_bar(cx, "(");
         assert_eq!(status(cx).map(|(_, total)| total), Some(0));
         let invalid = panel.read_with(cx, |panel, cx| match &panel.bar {

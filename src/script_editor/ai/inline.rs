@@ -15,7 +15,7 @@ use gpui::*;
 use mockaco_core::DiagnosticSeverity;
 use mockaco_gpui::native::WgpuiEditorView;
 use mockaco_gpui::BlockPlacement;
-use plugin_editor_api::llm::{self, EditorLlm as _};
+use plugin_editor_api::llm;
 use std::path::PathBuf;
 use ui::{
     button::{Button, ButtonVariants as _},
@@ -216,7 +216,9 @@ impl InlineAssist {
         let sender = tx.clone();
         cx.background_spawn(async move {
             let result = model.complete(request, &mut |chunk| {
-                sender.unbounded_send(Progress::Chunk(chunk.to_owned())).ok();
+                sender
+                    .unbounded_send(Progress::Chunk(chunk.to_owned()))
+                    .ok();
             });
             tx.unbounded_send(Progress::Done(result)).ok();
         })
@@ -327,7 +329,6 @@ fn diagnostics_in(view: &WgpuiEditorView, text: &str, region: &LineRegion) -> Ve
     notes
 }
 
-
 impl Render for InlineAssist {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
@@ -348,8 +349,10 @@ impl Render for InlineAssist {
         let muted = theme.muted_foreground;
         match &self.stage {
             Stage::Input => {
-                let chips = h_flex().gap_1().items_center().children(
-                    AssistKind::ALL.iter().map(|&kind| {
+                let chips = h_flex()
+                    .gap_1()
+                    .items_center()
+                    .children(AssistKind::ALL.iter().map(|&kind| {
                         Button::new(SharedString::from(format!("assist-{}", kind.label())))
                             .label(kind.label())
                             .ghost()
@@ -358,8 +361,7 @@ impl Render for InlineAssist {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.set_kind(kind, window, cx)
                             }))
-                    }),
-                );
+                    }));
                 let hint = self
                     .model_label
                     .clone()
@@ -373,14 +375,9 @@ impl Render for InlineAssist {
                             .gap_1()
                             .items_center()
                             .child(div().flex_1().child(TextInput::new(&self.input).small()))
-                            .child(
-                                Button::new("assist-run")
-                                    .label("Run")
-                                    .xsmall()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.submit(window, cx)
-                                    })),
-                            ),
+                            .child(Button::new("assist-run").label("Run").xsmall().on_click(
+                                cx.listener(|this, _, window, cx| this.submit(window, cx)),
+                            )),
                     )
                     .child(chips)
                     .child(div().text_xs().text_color(muted).child(hint))
@@ -483,4 +480,3 @@ impl Render for InlineAssist {
         }
     }
 }
-

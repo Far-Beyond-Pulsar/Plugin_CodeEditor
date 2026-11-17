@@ -21,7 +21,6 @@ CodeEditor.RunScript: Run Script (F5)
 CodeEditor.DebugScript: Debug Script (F9)
 CodeEditor.MarkdownReady: Markdown preview ready
 CodeEditor.RefreshHint: Click the refresh button or press Ctrl+R to update
-CodeEditor.Welcome: Welcome to Script Editor
 CodeEditor.OpenFileHint: Open a file from the explorer to start editing
 CodeEditor.Utf8: UTF-8
 CodeEditor.Lf: LF

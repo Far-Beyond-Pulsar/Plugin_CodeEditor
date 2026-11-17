@@ -64,7 +64,13 @@ mod tests {
                         '(' | '[' | '{' => stack.push(c),
                         ')' | ']' | '}' => {
                             let open = stack.pop();
-                            if open != Some(match c { ')' => '(', ']' => '[', _ => '{' }) {
+                            if open
+                                != Some(match c {
+                                    ')' => '(',
+                                    ']' => '[',
+                                    _ => '{',
+                                })
+                            {
                                 return false;
                             }
                         }

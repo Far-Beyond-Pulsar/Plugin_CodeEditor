@@ -175,7 +175,8 @@ keeping the file's indentation and style -- inside a single fenced code block. \
 Do not repeat the surrounding code. Do not add commentary before or after the block. \
 If the region needs no change, reply with the region unchanged.";
 
-const ANSWER_SYSTEM: &str = "You are a senior engineer answering questions about code in a game engine's \
+const ANSWER_SYSTEM: &str =
+    "You are a senior engineer answering questions about code in a game engine's \
 code editor. Be direct and specific; refer to line numbers when it helps. Use short markdown, with \
 fenced code blocks only for code worth copying. Do not restate the question.";
 
@@ -185,7 +186,10 @@ fn describe_diagnostics(notes: &[DiagnosticNote]) -> String {
     }
     let mut out = String::from("\nDiagnostics reported by the language server:\n");
     for note in notes.iter().take(20) {
-        out.push_str(&format!("- line {} ({}): {}\n", note.line, note.severity, note.message));
+        out.push_str(&format!(
+            "- line {} ({}): {}\n",
+            note.line, note.severity, note.message
+        ));
     }
     out
 }
@@ -213,7 +217,11 @@ pub fn build_request(kind: AssistKind, instruction: &str, context: &AssistContex
     let (before, selected, after) = excerpt(context);
     let instruction = match instruction.trim() {
         "" => default_instruction(kind).to_owned(),
-        text if matches!(kind, AssistKind::Document | AssistKind::Tests | AssistKind::Fix) => {
+        text if matches!(
+            kind,
+            AssistKind::Document | AssistKind::Tests | AssistKind::Fix
+        ) =>
+        {
             format!("{} Additional guidance: {text}", default_instruction(kind))
         }
         text => text.to_owned(),
@@ -231,7 +239,9 @@ pub fn build_request(kind: AssistKind, instruction: &str, context: &AssistContex
         body.push_str(&before);
         body.push_str("\n</before_region>\n");
     }
-    body.push_str(&format!("<region lines=\"{region_first}-{region_last}\">\n"));
+    body.push_str(&format!(
+        "<region lines=\"{region_first}-{region_last}\">\n"
+    ));
     body.push_str(&selected);
     body.push_str("\n</region>\n");
     if !after.is_empty() {
@@ -242,7 +252,12 @@ pub fn build_request(kind: AssistKind, instruction: &str, context: &AssistContex
     body.push_str(&describe_diagnostics(&context.diagnostics));
     body.push_str(&format!("\nInstruction: {instruction}\n"));
     LlmRequest {
-        system: if kind.edits() { EDIT_SYSTEM } else { ANSWER_SYSTEM }.to_owned(),
+        system: if kind.edits() {
+            EDIT_SYSTEM
+        } else {
+            ANSWER_SYSTEM
+        }
+        .to_owned(),
         messages: vec![LlmMessage::user(body)],
         temperature: Some(if kind.edits() { 0.1 } else { 0.3 }),
         max_tokens: Some(if kind.edits() { 8192 } else { 4096 }),
@@ -311,14 +326,20 @@ mod tests {
 
     #[test]
     fn replies_yield_their_code() {
-        assert_eq!(extract_code("```rust\nfn x() {}\n```").as_deref(), Some("fn x() {}"));
+        assert_eq!(
+            extract_code("```rust\nfn x() {}\n```").as_deref(),
+            Some("fn x() {}")
+        );
         assert_eq!(
             extract_code("Here you go:\n```\na\nb\n```\nDone.").as_deref(),
             Some("a\nb")
         );
         assert_eq!(extract_code("plain\ntext").as_deref(), Some("plain\ntext"));
         // An unterminated fence (a cut-off reply) still gives the code so far.
-        assert_eq!(extract_code("```rust\nfn x() {}").as_deref(), Some("fn x() {}"));
+        assert_eq!(
+            extract_code("```rust\nfn x() {}").as_deref(),
+            Some("fn x() {}")
+        );
         assert_eq!(extract_code("   \n"), None);
         assert_eq!(extract_code("```\n```"), None);
     }
@@ -352,7 +373,9 @@ mod tests {
     #[test]
     fn empty_instructions_fall_back_and_extras_are_appended() {
         let fix = build_request(AssistKind::Fix, "", &context());
-        assert!(fix.messages[0].content.contains("Instruction: Fix the problems"));
+        assert!(fix.messages[0]
+            .content
+            .contains("Instruction: Fix the problems"));
         let tests = build_request(AssistKind::Tests, "cover overflow", &context());
         assert!(tests.messages[0]
             .content
