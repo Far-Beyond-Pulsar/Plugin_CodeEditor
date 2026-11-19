@@ -20,7 +20,6 @@ use ui::{
     v_flex, ActiveTheme, Disableable as _, Sizable as _, StyledExt,
 };
 
-use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
 
 actions!(script_editor, [SaveCurrentFile, CloseCurrentFile]);
 
@@ -57,8 +56,8 @@ pub struct ScriptEditor {
     /// Resizable state for diff mode split
     diff_resizable_state: Entity<ResizableState>,
     horizontal_resizable_state: Entity<ResizableState>,
-    /// Global rust analyzer for LSP support
-    rust_analyzer: Option<Entity<RustAnalyzerManager>>,
+    /// The engine's language servers (LSP support), when the host gave them.
+    language_servers: Option<Entity<pulsar_lsp::LanguageServers>>,
     /// Current mode (normal or diff)
     mode: ScriptEditorMode,
     /// Diff mode file list with before/after content
@@ -95,10 +94,10 @@ impl ScriptEditor {
         let diff_resizable_state = ResizableState::new(cx);
 
         let file_explorer = cx.new(|cx| FileExplorer::new(window, cx));
-        // The host's context carries the engine's language server. The working
-        // editor attaches to it; the diff view shows historical text under real
-        // file names and must never be announced to the server.
-        let analyzer = settings.services().language_server.clone();
+        // The host's context carries the engine's language servers. The working
+        // editor attaches to them; the diff view shows historical text under real
+        // file names and must never be announced to a server.
+        let language_servers = settings.services().language_servers.clone();
         let diff_settings = settings
             .clone()
             .with_services(plugin_editor_api::EditorServices::default());
@@ -152,7 +151,7 @@ impl ScriptEditor {
             diff_editor,
             diff_resizable_state,
             horizontal_resizable_state,
-            rust_analyzer: analyzer,
+            language_servers,
             mode: ScriptEditorMode::Normal,
             diff_files: Vec::new(),
             selected_diff_index: None,
@@ -161,17 +160,17 @@ impl ScriptEditor {
         }
     }
 
-    /// Attaches the engine's shared rust-analyzer. The editor never starts, stops
-    /// or re-roots it: where it runs is the engine's decision. The text editor owns the
-    /// document sync, diagnostics and requests from here on.
-    pub fn set_rust_analyzer(
+    /// Attaches the engine's language servers. The editor never starts, stops
+    /// or re-roots one: where each runs is the engine's decision. The text
+    /// editor owns the document sync, diagnostics and requests from here on.
+    pub fn set_language_servers(
         &mut self,
-        analyzer: Entity<RustAnalyzerManager>,
+        servers: Entity<pulsar_lsp::LanguageServers>,
         cx: &mut Context<Self>,
     ) {
-        self.rust_analyzer = Some(analyzer.clone());
+        self.language_servers = Some(servers.clone());
         self.text_editor.update(cx, |editor, cx| {
-            editor.set_rust_analyzer(analyzer, cx);
+            editor.set_language_servers(servers, cx);
         });
     }
 
@@ -641,6 +640,10 @@ impl ScriptEditor {
         let generating = editor.is_generating();
         let status = editor.lsp_status(cx);
         let view_focus = editor.current_view().map(|view| view.focus_handle(cx));
+        let commands = editor
+            .current_file_path()
+            .map(|path| editor.language_commands(&path, cx))
+            .unwrap_or_default();
 
         h_flex()
             .w_full()
@@ -654,7 +657,7 @@ impl ScriptEditor {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(Self::render_menus(view_focus))
+                    .child(Self::render_menus(view_focus, commands))
                     .child(
                         div()
                             .text_sm()
@@ -703,7 +706,10 @@ impl ScriptEditor {
     /// The editor's menu strip (Pulsar-Native#1012). Its items dispatch to
     /// the open file's view, whose panel handles them as it does for the
     /// context menu and the keys.
-    fn render_menus(view_focus: Option<FocusHandle>) -> impl IntoElement {
+    fn render_menus(
+        view_focus: Option<FocusHandle>,
+        commands: Vec<(&'static str, &'static str)>,
+    ) -> impl IntoElement {
         use plugin_editor_api::EditorMenu;
         use text_editor::*;
         let open = view_focus.is_some();
@@ -728,7 +734,9 @@ impl ScriptEditor {
                     .action_if("Find Previous", EditorFindPrevious, open)
                     .separator()
                     .action_if("Format Document", EditorFormatDocument, open)
-                    .action_if("Format Selection", EditorFormatSelection, open),
+                    .action_if("Format Selection", EditorFormatSelection, open)
+                    .separator()
+                    .action_if("Rename Symbol", EditorRenameSymbol, open),
             )
             .menu(
                 EditorMenu::new("Selection")
@@ -750,21 +758,30 @@ impl ScriptEditor {
                     )
                     .separator()
                     .action_if("Go to Definition", EditorGoToDefinition, open)
-                    .action_if("Go to References", EditorGoToReferences, open)
-                    .action_if("Go to Parent Module", EditorGoToParentModule, open),
+                    .action_if("Go to References", EditorGoToReferences, open),
             )
             .menu(
-                EditorMenu::new("Tools")
-                    .action_if("Expand Macro", EditorExpandMacro, open)
-                    .action_if("Open Cargo.toml", EditorOpenCargoToml, open)
-                    .action_if("Reload Cargo Workspace", EditorReloadWorkspace, open)
-                    .separator()
-                    .action_if(
-                        "Generate 1M-Line Stress File",
-                        EditorGenerateStressFile,
-                        open,
-                    ),
+                EditorMenu::new("Tools").action_if(
+                    "Generate 1M-Line Stress File",
+                    EditorGenerateStressFile,
+                    open,
+                ),
             );
+        // What the open file's language server offers beyond the standard
+        // requests (Rust: expand macro, open Cargo.toml, ...).
+        let strip = if commands.is_empty() {
+            strip
+        } else {
+            let mut language = EditorMenu::new("Language");
+            for (id, label) in commands {
+                language = language.action_if(
+                    label,
+                    EditorServerCommand { id: id.to_string() },
+                    open,
+                );
+            }
+            strip.menu(language)
+        };
         match view_focus {
             Some(focus) => strip.action_context(focus),
             None => strip,

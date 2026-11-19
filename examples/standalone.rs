@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
+use pulsar_lsp::LanguageServers;
 use gpui::*;
 use script_editor_plugin::{ScriptEditorPanel, TextEditorEvent};
 use tracing_subscriber::EnvFilter;
@@ -45,12 +45,12 @@ impl StandaloneApp {
     ) -> Self {
         let editor = cx.new(|cx| ScriptEditorPanel::new(window, cx));
 
-        let analyzer = cx.new(|cx| RustAnalyzerManager::new(window, cx));
-        analyzer.update(cx, |analyzer, cx| {
-            analyzer.start(project_root.clone(), window, cx);
-        });
+        // The engine's language servers: each file is routed to the server that
+        // claims it, started on its first file.
+        let servers = cx.new(LanguageServers::new);
+        servers.update(cx, |servers, cx| servers.set_project(project_root.clone(), cx));
         editor.update(cx, |editor, cx| {
-            editor.set_rust_analyzer(analyzer, cx);
+            editor.set_language_servers(servers, cx);
         });
 
         tracing::info!("Loading project root: {:?}", project_root);

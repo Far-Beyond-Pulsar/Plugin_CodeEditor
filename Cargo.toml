@@ -40,6 +40,9 @@ mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3
 # Engine dependencies
 engine_state  = { workspace = true }
 engine_backend     = { workspace = true }
+pulsar_lsp         = { workspace = true }
+# `Language`: which language a file is; the server command specs.
+pulsar_language    = { workspace = true }
 
 # Utilities
 uuid = { version = "1.11", features = ["v4", "serde"] }

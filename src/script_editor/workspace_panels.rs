@@ -4,13 +4,12 @@ use super::ai::{AssistKind, InlineAssist, InlineAssistEvent};
 use super::text_editor::{
     EditorAddCursorAbove, EditorAddCursorBelow, EditorAddNextOccurrence, EditorAiAsk,
     EditorAiDocument, EditorAiEdit, EditorAiExplain, EditorAiFix, EditorAiTests, EditorCloseBar,
-    EditorCopy, EditorCopyPath, EditorCut, EditorExpandMacro, EditorFind, EditorFindNext,
+    EditorCopy, EditorCopyPath, EditorCut, EditorFind, EditorFindNext,
     EditorFindPrevious, EditorFormatDocument, EditorFormatSelection, EditorGenerateStressFile,
-    EditorGoToDefinition, EditorGoToLine, EditorGoToParentModule, EditorGoToReferences,
-    EditorGoToSymbol, EditorGoToWorkspaceSymbol, EditorOpenCargoToml, EditorPaste, EditorRedo,
-    EditorReloadWorkspace, EditorReplace, EditorSave, EditorSelectAll, EditorToggleFindCase,
-    EditorToggleFindRegex, EditorToggleFindWholeWord, EditorUndo, EditorUnfoldAll, LocationItem,
-    TextEditor,
+    EditorGoToDefinition, EditorGoToLine, EditorGoToReferences, EditorGoToSymbol,
+    EditorGoToWorkspaceSymbol, EditorPaste, EditorRedo, EditorRenameSymbol, EditorReplace,
+    EditorSave, EditorSelectAll, EditorServerCommand, EditorToggleFindCase, EditorToggleFindRegex,
+    EditorToggleFindWholeWord, EditorUndo, EditorUnfoldAll, LocationItem, TextEditor,
 };
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
@@ -39,6 +38,7 @@ pub(crate) fn bind_editor_keys(cx: &mut App) {
         KeyBinding::new("f3", EditorFindNext, context),
         KeyBinding::new("shift-f3", EditorFindPrevious, context),
         KeyBinding::new("ctrl-g", EditorGoToLine, context),
+        KeyBinding::new("f2", EditorRenameSymbol, context),
         KeyBinding::new("f12", EditorGoToDefinition, context),
         KeyBinding::new("shift-f12", EditorGoToReferences, context),
         KeyBinding::new("ctrl-shift-o", EditorGoToSymbol, context),
@@ -57,6 +57,12 @@ pub(crate) fn bind_editor_keys(cx: &mut App) {
 enum Bar {
     Find(FindBar),
     GoToLine {
+        input: Entity<InputState>,
+        _subscription: Subscription,
+    },
+    /// Rename Symbol: the new name; Enter asks the language server for the
+    /// rename and applies the edit it answers with.
+    Rename {
         input: Entity<InputState>,
         _subscription: Subscription,
     },
@@ -419,6 +425,36 @@ impl FilePanel {
         cx.notify();
     }
 
+    /// Asks for the new name of the symbol under the caret and renames it.
+    fn open_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = cx.new(|cx| {
+            let input = InputState::new(window, cx).placeholder("New name");
+            input.focus(window, cx);
+            input
+        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this: &mut Self, input, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = event {
+                    let name = input.read(cx).value().trim().to_string();
+                    if !name.is_empty() {
+                        this.with_editor(cx, |editor, path, cx| {
+                            editor.rename_symbol(path, name.clone(), cx)
+                        });
+                        this.close_bar(window, cx);
+                    }
+                }
+            },
+        );
+        self.close_other_bar(cx);
+        self.bar = Some(Bar::Rename {
+            input,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
     /// Asks for references or symbols and shows the filterable list.
     fn open_locations(
         &mut self,
@@ -658,6 +694,13 @@ impl FilePanel {
                     .child(div().text_xs().text_color(muted).child("Go to Line"))
                     .child(div().flex_1().child(TextInput::new(input).small())),
             ),
+            Bar::Rename { input, .. } => frame.child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().text_xs().text_color(muted).child("Rename Symbol"))
+                    .child(div().flex_1().child(TextInput::new(input).small())),
+            ),
             Bar::Locations { filter, .. } => {
                 let list = self
                     .text_editor
@@ -879,17 +922,14 @@ impl Render for FilePanel {
                     this.open_workspace_symbols(window, cx)
                 }),
             )
-            .on_action(cx.listener(|this, _: &EditorGoToParentModule, _, cx| {
-                this.with_editor(cx, |editor, path, cx| editor.go_to_parent_module(path, cx))
+            .on_action(cx.listener(|this, _: &EditorRenameSymbol, window, cx| {
+                this.open_rename(window, cx)
             }))
-            .on_action(cx.listener(|this, _: &EditorExpandMacro, _, cx| {
-                this.with_editor(cx, |editor, path, cx| editor.expand_macro(path, cx))
-            }))
-            .on_action(cx.listener(|this, _: &EditorOpenCargoToml, _, cx| {
-                this.with_editor(cx, |editor, path, cx| editor.open_cargo_toml(path, cx))
-            }))
-            .on_action(cx.listener(|this, _: &EditorReloadWorkspace, _, cx| {
-                this.with_editor(cx, |editor, _, cx| editor.reload_workspace(cx))
+            .on_action(cx.listener(|this, action: &EditorServerCommand, _, cx| {
+                let id = action.id.clone();
+                this.with_editor(cx, |editor, path, cx| {
+                    editor.run_language_command(path, &id, cx)
+                })
             }))
             .on_action(
                 cx.listener(|this, _: &EditorGenerateStressFile, window, cx| {
@@ -1056,6 +1096,7 @@ mod tests {
             panel.read_with(cx, |panel, _| match &panel.bar {
                 Some(Bar::Find(find)) => find.query.clone(),
                 Some(Bar::GoToLine { input, .. }) => input.clone(),
+                Some(Bar::Rename { input, .. }) => input.clone(),
                 Some(Bar::Locations { filter, .. }) => filter.clone(),
                 None => panic!("no bar is open"),
             })

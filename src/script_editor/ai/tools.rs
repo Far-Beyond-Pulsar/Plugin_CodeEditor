@@ -229,7 +229,8 @@ fn registry() -> &'static ToolRegistry {
 
         add(DynamicTool::builder("code_editor_get_diagnostics")
             .description(
-                "The language server's current errors and warnings for a file, with line numbers.",
+                "The current errors and warnings for a file, with line numbers, from every \
+                 language server and compiler that reports on it.",
             )
             .category("code_editor")
             .parameters(json!({ "type": "object", "properties": { "path": path_schema() } }))

@@ -160,12 +160,12 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Arc<dyn PanelView>, PluginError> {
-        // The language server comes from the editor's context, exactly as it does
+        // The language servers come from the editor's context, exactly as they do
         // for a plugin library; there is no process-wide handle to fall back on.
         let services = editor_context.services.clone();
         let project_root = editor_context.project_root.clone();
-        if services.language_server.is_none() {
-            tracing::warn!("No language server in the editor context; Script Editor LSP is off");
+        if services.language_servers.is_none() {
+            tracing::warn!("No language servers in the editor context; Script Editor LSP is off");
         }
         let settings = plugin_editor_api::EditorSettingsSnapshot::default().with_services(services);
         let panel = cx.new(|cx| crate::ScriptEditorPanel::new_with_settings(window, cx, settings));

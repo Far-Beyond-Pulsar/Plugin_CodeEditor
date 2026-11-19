@@ -1,25 +1,33 @@
 //! Language-server wiring for the Mockaco editor host.
 //!
-//! The engine runs one rust-analyzer for the whole project. This editor never
-//! starts, restarts or configures it: it attaches to the shared
-//! [`RustAnalyzerManager`], keeps the server's copy of each open document in
-//! step, and answers the editor view's questions (hover, completion,
-//! definition) through the manager's request channel.
+//! The engine runs the language servers ([`LanguageServers`]); this editor
+//! never starts, restarts or configures one. Each open file is routed to the
+//! server that claims it (`server_for`: by the file's language, in the
+//! root its strategy picks), and the editor keeps that server's copy of the
+//! document in step and answers the view's questions (hover, completion,
+//! definition) through the server's request channel. A file no server claims
+//! is a plain text editor with highlighting.
 //!
-//! * Document sync is incremental: Mockaco logs each edit as an LSP content
-//!   change and [`TextEditor::lsp_sync`] forwards exactly that, so a keystroke
-//!   costs a few bytes whatever the file size. Only undo/redo and wholesale
-//!   replacement fall back to sending the full text.
-//! * Diagnostics arrive per file ([`AnalyzerEvent::FileDiagnostics`]) and go
-//!   straight to the matching view, which draws and tracks them.
+//! * Document sync is incremental when the server takes it: Mockaco logs each
+//!   edit as an LSP content change and [`TextEditor::lsp_sync`] forwards
+//!   exactly that, so a keystroke costs a few bytes whatever the file size.
+//!   Undo/redo, wholesale replacement and servers that take full text only
+//!   send the full text.
+//! * Diagnostics come from the shared store, per file and from every source
+//!   (the server's, a compiler's), and go straight to the matching view,
+//!   which draws and tracks them.
+//! * A file whose language has a script compiler also hands its text to the
+//!   service on open, edit and save ([`TextEditor::lsp_check`]); the service
+//!   debounces, compiles off the UI thread and publishes the compiler's
+//!   problems (source `Pulsar`) beside the server's.
 //! * Requests are answered on the foreground executor as they complete; every
 //!   answer names the request and document version it was asked against, and
 //!   the view drops it when the user has moved on.
+//! * What only one server understands (Rust's "Expand macro") is a command
+//!   the server's spec lists ([`ServerCommandSpec`]); the menu offers the
+//!   commands of the open file's server.
 
 use super::{OpenFile, TextEditor, TextEditorEvent};
-use engine_backend::services::rust_analyzer_manager::{
-    path_key, path_to_uri, uri_to_path, AnalyzerEvent, AnalyzerStatus, RustAnalyzerManager,
-};
 use gpui::*;
 use mockaco_core::{DiagnosticSeverity, TextPosition};
 use mockaco_gpui::intel::{
@@ -27,20 +35,26 @@ use mockaco_gpui::intel::{
 };
 use mockaco_gpui::native::{EditorEvent, LspRequest, WgpuiEditorView};
 use mockaco_gpui::{PendingSync, TextChange};
+use pulsar_lsp::{
+    path_key, path_to_uri, uri_to_path, DiagnosticsEvent,
+    DiagnosticsStore, LanguageServer, LanguageServers, LanguageServersEvent, ServerEvent,
+    ServerId, ServerStatus,
+};
+use pulsar_language::{CommandContext, CommandResult};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// The editor's attachment to the shared analyzer.
+/// The editor's attachment to the engine's language servers.
 pub(super) struct LspClient {
-    analyzer: Entity<RustAnalyzerManager>,
+    servers: Entity<LanguageServers>,
     /// The raw items of the most recent completion response. A menu entry's
     /// `host_data` is its index + 1, so resolving needs no lookup table.
     completions: Option<CompletionStore>,
     /// `additionalTextEdits` already fetched while the user browsed the menu.
     resolved_edits: HashMap<u64, Vec<PositionEdit>>,
-    _events: Subscription,
+    _events: Vec<Subscription>,
     _release: Subscription,
 }
 
@@ -49,188 +63,260 @@ struct CompletionStore {
     items: Arc<Vec<Value>>,
 }
 
-/// Fallback for the characters rust-analyzer registers, used until it has told us.
-const SERVER_TRIGGER_CHARACTERS: [char; 4] = [':', '.', '\x27', '('];
-
-/// Whether the language server handles `path`.
-pub(super) fn is_rust(path: &PathBuf) -> bool {
-    path.extension().and_then(|extension| extension.to_str()) == Some("rs")
-}
-
 impl TextEditor {
-    /// Attaches this editor to the engine's shared analyzer. Documents that
-    /// are already open are announced as soon as the server can take them.
-    pub fn set_rust_analyzer(
+    /// Attaches this editor to the engine's language servers. Every open file
+    /// that a server claims is announced to it as soon as it can take
+    /// documents.
+    pub fn set_language_servers(
         &mut self,
-        analyzer: Entity<RustAnalyzerManager>,
+        servers: Entity<LanguageServers>,
         cx: &mut Context<Self>,
     ) {
-        let events = cx.subscribe(
-            &analyzer,
-            |this: &mut Self, _manager, event: &AnalyzerEvent, cx| {
-                this.on_analyzer_event(event, cx);
+        let store = servers.read(cx).diagnostics();
+        let server_events = cx.subscribe(
+            &servers,
+            |this: &mut Self, _servers, event: &LanguageServersEvent, cx| {
+                this.on_language_servers_event(event, cx);
+            },
+        );
+        let diagnostics_events = cx.subscribe(
+            &store,
+            |this: &mut Self, store, event: &DiagnosticsEvent, cx| {
+                this.on_diagnostics_event(&store, event, cx);
             },
         );
         let release = cx.on_release(|this: &mut Self, cx: &mut App| this.lsp_release(cx));
         self.lsp = Some(LspClient {
-            analyzer,
+            servers,
             completions: None,
             resolved_edits: HashMap::new(),
-            _events: events,
+            _events: vec![server_events, diagnostics_events],
             _release: release,
         });
-        let views: Vec<_> = self
-            .open_files
-            .iter()
-            .filter(|file| is_rust(&file.path))
-            .map(|file| file.view.clone())
-            .collect();
-        for view in views {
-            view.update(cx, |view, cx| view.set_language_intelligence(true, cx));
-        }
         self.lsp_open_pending(cx);
-    }
-
-    /// One line saying why language features are or are not available.
-    pub fn lsp_status(&self, cx: &App) -> String {
-        let Some(client) = &self.lsp else {
-            return "language server: not attached to the engine analyzer".to_owned();
-        };
-        let state = match client.analyzer.read(cx).status() {
-            AnalyzerStatus::Idle => "idle".to_owned(),
-            AnalyzerStatus::Starting => "starting".to_owned(),
-            AnalyzerStatus::Indexing { progress, .. } => {
-                format!("indexing {:.0}%", progress * 100.0)
-            }
-            AnalyzerStatus::Ready => "ready".to_owned(),
-            AnalyzerStatus::Error(error) => format!("error: {error}"),
-            AnalyzerStatus::Stopped => "stopped".to_owned(),
-        };
-        let document = match self.current_file() {
-            Some(file) if !is_rust(&file.path) => "not a Rust file",
-            Some(file) if file.lsp_open => "synced",
-            Some(_) => "not synced yet",
-            None => "none",
-        };
-        format!("rust-analyzer: {state}, document {document}")
-    }
-
-    fn analyzer(&self) -> Option<Entity<RustAnalyzerManager>> {
-        self.lsp.as_ref().map(|client| client.analyzer.clone())
-    }
-
-    fn on_analyzer_event(&mut self, event: &AnalyzerEvent, cx: &mut Context<Self>) {
-        match event {
-            AnalyzerEvent::StatusChanged(status) => match status {
-                AnalyzerStatus::Starting
-                | AnalyzerStatus::Stopped
-                | AnalyzerStatus::Idle
-                | AnalyzerStatus::Error(_) => self.lsp_forget_documents(),
-                _ => self.lsp_open_pending(cx),
-            },
-            AnalyzerEvent::Error(_) => self.lsp_forget_documents(),
-            AnalyzerEvent::IndexingProgress { .. } | AnalyzerEvent::Ready => {
-                self.lsp_open_pending(cx)
-            }
-            AnalyzerEvent::FileDiagnostics { key, diagnostics } => {
-                if let Some(index) = self
-                    .open_files
-                    .iter()
-                    .position(|file| file.lsp_open && path_key(&file.path) == *key)
-                {
-                    self.lsp_apply_diagnostics(index, diagnostics, cx);
-                }
-            }
-            AnalyzerEvent::Diagnostics(_) => {}
-        }
-    }
-
-    /// The server restarted or stopped: it no longer has our documents, so
-    /// they are announced again when it is back.
-    fn lsp_forget_documents(&mut self) {
-        for file in &mut self.open_files {
-            file.lsp_open = false;
-        }
-        if let Some(client) = &mut self.lsp {
-            client.completions = None;
-            client.resolved_edits.clear();
-        }
-    }
-
-    /// Sends `didOpen` for every Rust document the server does not have yet,
-    /// once the server can accept documents.
-    pub(super) fn lsp_open_pending(&mut self, cx: &mut Context<Self>) {
-        let Some(analyzer) = self.analyzer() else {
-            return;
-        };
-        if !analyzer.read(cx).is_initialized() {
-            return;
-        }
-        // Offer completion on whatever the server registered, as VS Code and Zed do.
-        let triggers = analyzer.read(cx).completion_trigger_characters();
-        if !triggers.is_empty() {
-            for file in self.open_files.iter().filter(|file| is_rust(&file.path)) {
-                let triggers = triggers.clone();
-                file.view
-                    .update(cx, |view, _| view.set_completion_triggers(triggers));
-            }
-        }
         for index in 0..self.open_files.len() {
-            let file = &self.open_files[index];
-            if file.lsp_open || !is_rust(&file.path) {
-                continue;
-            }
-            let path = file.path.clone();
-            let view = file.view.clone();
-            let text = view.read(cx).text();
-            let sent = analyzer.read(cx).did_open_file(&path, &text, "rust");
-            match sent {
-                Ok(()) => {
-                    self.open_files[index].lsp_open = true;
-                    // The server now has the current text; earlier edits
-                    // are already inside it.
-                    view.update(cx, |view, _| {
-                        let _ = view.take_pending_sync();
-                    });
-                    let cached = analyzer.read(cx).diagnostics_for(&path);
-                    if !cached.is_empty() {
-                        self.lsp_apply_diagnostics(index, &cached, cx);
-                    }
-                }
-                Err(error) => {
-                    tracing::debug!(
-                        "rust-analyzer not ready for {:?}: {}",
-                        path.file_name(),
-                        error
-                    )
-                }
-            }
+            self.lsp_check(index, cx);
         }
     }
 
-    /// Forwards the edits made since the last call.
-    pub(super) fn lsp_sync(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(analyzer) = self.analyzer() else {
+    /// Hand the text of file `index` to the service's live compiler check, if
+    /// its language has a compiler (the service debounces and runs it off the
+    /// UI thread). Called on open, on edit and on save.
+    pub(super) fn lsp_check(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(servers) = self.servers() else {
             return;
         };
         let Some(file) = self.open_files.get(index) else {
             return;
         };
-        if !file.lsp_open {
+        let path = file.path.clone();
+        if !servers.read(cx).has_compiler_for(&path) {
             return;
         }
+        let text = file.view.read(cx).text();
+        servers.update(cx, |servers, cx| servers.check_source(&path, &text, cx));
+    }
+
+    /// One line saying why language features are or are not available for the
+    /// current file.
+    pub fn lsp_status(&self, cx: &App) -> String {
+        let Some(client) = &self.lsp else {
+            return "language servers: not attached to the engine".to_owned();
+        };
+        let Some(file) = self.current_file() else {
+            return "language server: no file".to_owned();
+        };
+        let Some((_, spec)) = client.servers.read(cx).server_spec_for(&file.path) else {
+            return "language server: none for this file".to_owned();
+        };
+        let Some(server) = &file.server else {
+            return format!("{}: not started", spec.display_name);
+        };
+        let server = server.read(cx);
+        let state = match server.status() {
+            ServerStatus::Idle => "idle".to_owned(),
+            ServerStatus::Starting => "starting".to_owned(),
+            ServerStatus::Indexing { progress, .. } => {
+                format!("indexing {:.0}%", progress * 100.0)
+            }
+            ServerStatus::Ready => "ready".to_owned(),
+            ServerStatus::Error(error) => format!("error: {error}"),
+            ServerStatus::Missing(message) => format!("not installed: {message}"),
+            ServerStatus::Stopped => "stopped".to_owned(),
+        };
+        let document = if file.lsp_open { "synced" } else { "not synced yet" };
+        format!("{}: {state}, document {document}", spec.display_name)
+    }
+
+    fn servers(&self) -> Option<Entity<LanguageServers>> {
+        self.lsp.as_ref().map(|client| client.servers.clone())
+    }
+
+    /// What the service reports: a server that stopped or restarted no longer
+    /// has its documents (they are announced again when it is back); one that
+    /// made progress can take documents.
+    fn on_language_servers_event(&mut self, event: &LanguageServersEvent, cx: &mut Context<Self>) {
+        match event {
+            LanguageServersEvent::Server { id, event } => match event {
+                ServerEvent::StatusChanged(
+                    ServerStatus::Stopped
+                    | ServerStatus::Idle
+                    | ServerStatus::Error(_)
+                    | ServerStatus::Missing(_),
+                )
+                | ServerEvent::Error(_)
+                | ServerEvent::Stopped(_) => self.lsp_forget_documents(Some(id), cx),
+                ServerEvent::StatusChanged(_) | ServerEvent::Progress { .. } | ServerEvent::Ready => {
+                    self.lsp_open_pending(cx)
+                }
+            },
+            LanguageServersEvent::Removed(id) => self.lsp_forget_documents(Some(id), cx),
+            LanguageServersEvent::Added(_) => self.lsp_open_pending(cx),
+        }
+    }
+
+    /// The store changed for one file: every source's diagnostics of it go to
+    /// the open view (an empty set clears the squiggles).
+    fn on_diagnostics_event(
+        &mut self,
+        store: &Entity<DiagnosticsStore>,
+        event: &DiagnosticsEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let DiagnosticsEvent::Changed { key, path, .. } = event;
+        let Some(index) = self
+            .open_files
+            .iter()
+            .position(|file| path_key(&file.path) == *key)
+        else {
+            return;
+        };
+        let all: Vec<ui::diagnostics::Diagnostic> = store
+            .read(cx)
+            .for_file(path)
+            .into_iter()
+            .map(|(_, diagnostic)| diagnostic)
+            .collect();
+        self.lsp_apply_diagnostics(index, &all, cx);
+    }
+
+    /// The server `id` (every server when `None`) restarted or stopped: it no
+    /// longer has our documents, so they are announced again when it is back.
+    /// A file whose server is gone for good loses language intelligence.
+    fn lsp_forget_documents(&mut self, id: Option<&ServerId>, cx: &mut Context<Self>) {
+        for file in &mut self.open_files {
+            let bound = file
+                .server
+                .as_ref()
+                .is_some_and(|server| id.is_none_or(|id| server.read(cx).id() == id));
+            if bound {
+                file.lsp_open = false;
+                file.server = None;
+                file.view
+                    .update(cx, |view, cx| view.set_language_intelligence(false, cx));
+            }
+        }
+        if let Some(client) = &mut self.lsp {
+            client.completions = None;
+            client.resolved_edits.clear();
+        }
+        // A server that is still there (a restart) takes them again now.
+        self.lsp_open_pending(cx);
+    }
+
+    /// Routes every open file that no server has yet to the server that
+    /// claims it, and announces its text once the server runs.
+    pub(super) fn lsp_open_pending(&mut self, cx: &mut Context<Self>) {
+        let Some(servers) = self.servers() else {
+            return;
+        };
+        for index in 0..self.open_files.len() {
+            if self.open_files[index].lsp_open {
+                self.lsp_refresh_triggers(index, cx);
+                continue;
+            }
+            let path = self.open_files[index].path.clone();
+            let server = match self.open_files[index].server.clone() {
+                Some(server) => Some(server),
+                None => servers.update(cx, |servers, cx| servers.server_for(&path, cx)),
+            };
+            let Some(server) = server else {
+                continue;
+            };
+            let view = self.open_files[index].view.clone();
+            let text = view.read(cx).text();
+            let language_id = server.read(cx).language_id_of(&path);
+            match server.read(cx).did_open_file(&path, &text, language_id) {
+                Ok(()) => {
+                    self.open_files[index].server = Some(server.clone());
+                    self.open_files[index].lsp_open = true;
+                    // The server now has (or will have) the current text; the
+                    // earlier edits are already inside it.
+                    view.update(cx, |view, cx| {
+                        view.set_language_intelligence(true, cx);
+                        let _ = view.take_pending_sync();
+                    });
+                    self.lsp_refresh_triggers(index, cx);
+                    let cached = servers.read(cx).diagnostics().read(cx).for_file(&path);
+                    if !cached.is_empty() {
+                        let all: Vec<_> = cached.into_iter().map(|(_, d)| d).collect();
+                        self.lsp_apply_diagnostics(index, &all, cx);
+                    }
+                }
+                Err(error) => {
+                    // Not running (yet, or any more): tried again on its next event.
+                    self.open_files[index].server = Some(server);
+                    tracing::debug!("language server not ready for {:?}: {error}", path.file_name());
+                }
+            }
+        }
+    }
+
+    /// Offer completion on whatever the server registered, as VS Code and Zed
+    /// do. Empty until the server has answered `initialize`.
+    fn lsp_refresh_triggers(&self, index: usize, cx: &mut Context<Self>) {
+        let Some(file) = self.open_files.get(index) else {
+            return;
+        };
+        let Some(server) = &file.server else {
+            return;
+        };
+        let triggers = server.read(cx).completion_trigger_characters();
+        if !triggers.is_empty() {
+            file.view
+                .update(cx, |view, _| view.set_completion_triggers(triggers));
+        }
+    }
+
+    /// Forwards the edits made since the last call.
+    pub(super) fn lsp_sync(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(file) = self.open_files.get(index) else {
+            return;
+        };
+        let Some(server) = file.server.clone().filter(|_| file.lsp_open) else {
+            return;
+        };
         let (path, version, view) = (file.path.clone(), file.version, file.view.clone());
+        let full = |view: &Entity<WgpuiEditorView>, cx: &mut Context<Self>| {
+            let text = view.read(cx).text();
+            server.read(cx).did_change_file(&path, &text, version)
+        };
         let result = match view.update(cx, |view, _| view.take_pending_sync()) {
             PendingSync::None => return,
-            PendingSync::Incremental(changes) => analyzer.read(cx).did_change_file_incremental(
-                &path,
-                version,
-                changes.iter().map(content_change).collect(),
-            ),
-            PendingSync::Full => {
-                let text = view.read(cx).text();
-                analyzer.read(cx).did_change_file(&path, &text, version)
+            PendingSync::Incremental(changes) => {
+                let sent = server.read(cx).did_change_file_incremental(
+                    &path,
+                    version,
+                    changes.iter().map(content_change).collect(),
+                );
+                // A server that takes full text only (or has not been told of
+                // the document yet) gets the whole text.
+                match sent {
+                    Ok(()) => Ok(()),
+                    Err(_) => full(&view, cx),
+                }
             }
+            PendingSync::Full => full(&view, cx),
         };
         if let Err(error) = result {
             tracing::debug!("didChange failed for {:?}: {}", path.file_name(), error);
@@ -238,38 +324,37 @@ impl TextEditor {
     }
 
     pub(super) fn lsp_saved(&mut self, index: usize, content: &str, cx: &mut Context<Self>) {
-        let Some(analyzer) = self.analyzer() else {
-            return;
-        };
         let Some(file) = self.open_files.get(index) else {
             return;
         };
-        if file.lsp_open {
-            if let Err(error) = analyzer.read(cx).did_save_file(&file.path, content) {
+        if let (true, Some(server)) = (file.lsp_open, &file.server) {
+            if let Err(error) = server.read(cx).did_save_file(&file.path, content) {
                 tracing::debug!("didSave failed for {:?}: {}", file.path.file_name(), error);
             }
         }
+        self.lsp_check(index, cx);
     }
 
     /// `file` has just been removed from the editor.
     pub(super) fn lsp_close(&mut self, file: &OpenFile, cx: &mut Context<Self>) {
-        let Some(analyzer) = self.analyzer() else {
-            return;
-        };
-        if file.lsp_open {
-            let _ = analyzer.read(cx).did_close_file(&file.path);
+        if let (true, Some(server)) = (file.lsp_open, &file.server) {
+            let _ = server.read(cx).did_close_file(&file.path);
+        }
+        if let Some(servers) = self.servers() {
+            servers.update(cx, |servers, cx| servers.forget_source(&file.path, cx));
         }
     }
 
     /// The panel is going away: release every document it held open.
     fn lsp_release(&mut self, cx: &mut App) {
-        let Some(client) = &self.lsp else {
-            return;
-        };
-        let analyzer = client.analyzer.read(cx);
         for file in &self.open_files {
-            if file.lsp_open {
-                let _ = analyzer.did_close_file(&file.path);
+            if let (true, Some(server)) = (file.lsp_open, &file.server) {
+                let _ = server.read(cx).did_close_file(&file.path);
+            }
+            if let Some(client) = &self.lsp {
+                client
+                    .servers
+                    .update(cx, |servers, cx| servers.forget_source(&file.path, cx));
             }
         }
     }
@@ -318,29 +403,29 @@ impl TextEditor {
         }
     }
 
-    /// The analyzer, the view and the document URI for a request, provided the
-    /// server has the document.
+    /// The server, the view and the document URI for a request, provided the
+    /// file's server has the document and can answer.
     fn lsp_target(
         &self,
         index: usize,
         cx: &Context<Self>,
-    ) -> Option<(Entity<RustAnalyzerManager>, Entity<WgpuiEditorView>, String)> {
-        let analyzer = self.analyzer()?;
+    ) -> Option<(Entity<LanguageServer>, Entity<WgpuiEditorView>, String)> {
         let file = self.open_files.get(index)?;
-        if !file.lsp_open || !analyzer.read(cx).is_running() {
+        let server = file.server.clone()?;
+        if !file.lsp_open || !server.read(cx).is_initialized() {
             return None;
         }
-        Some((analyzer, file.view.clone(), path_to_uri(&file.path)))
+        Some((server, file.view.clone(), path_to_uri(&file.path)))
     }
 
     fn lsp_hover(&mut self, index: usize, request: LspRequest, cx: &mut Context<Self>) {
-        let Some((analyzer, view, uri)) = self.lsp_target(index, cx) else {
+        let Some((server, view, uri)) = self.lsp_target(index, cx) else {
             tracing::info!("hover requested but the language server has no such document open (or is not running)");
             return;
         };
         let log_uri = uri.clone();
         let params = position_params(&uri, request.position);
-        let Ok(response) = analyzer
+        let Ok(response) = server
             .read(cx)
             .send_request_async("textDocument/hover", params)
         else {
@@ -373,14 +458,11 @@ impl TextEditor {
         trigger: Option<char>,
         cx: &mut Context<Self>,
     ) {
-        let Some((analyzer, view, uri)) = self.lsp_target(index, cx) else {
+        let Some((server, view, uri)) = self.lsp_target(index, cx) else {
             tracing::info!("completion requested but the language server has no such document open (or is not running)");
             return;
         };
-        let mut server_triggers = analyzer.read(cx).completion_trigger_characters();
-        if server_triggers.is_empty() {
-            server_triggers = SERVER_TRIGGER_CHARACTERS.to_vec();
-        }
+        let server_triggers = server.read(cx).completion_trigger_characters();
         let mut params = position_params(&uri, request.position);
         // Only the characters the server registered go as trigger characters;
         // the rest (space, comma, brackets...) are ordinary invocations.
@@ -390,7 +472,7 @@ impl TextEditor {
             }
             None => json!({ "triggerKind": 1 }),
         };
-        let Ok(first) = analyzer
+        let Ok(first) = server
             .read(cx)
             .send_request_async("textDocument/completion", params.clone())
         else {
@@ -399,8 +481,8 @@ impl TextEditor {
         cx.spawn(async move |this, cx| {
             let mut pending = first;
             let mut attempts = 0;
-            // rust-analyzer cancels a request that races a fresh edit and
-            // says so with ContentModified/ServerCancelled; asking again
+            // A server cancels a request that races a fresh edit and says so
+            // with ContentModified/ServerCancelled; asking again
             // gets the answer for the current text.
             let response = loop {
                 let Ok(response) = pending.recv_async().await else {
@@ -412,9 +494,9 @@ impl TextEditor {
                 }
                 attempts += 1;
                 let params = params.clone();
-                let analyzer = analyzer.clone();
+                let server = server.clone();
                 let Ok(Some(next)) = this.update(cx, |_, cx| {
-                    analyzer
+                    server
                         .read(cx)
                         .send_request_async("textDocument/completion", params)
                         .ok()
@@ -465,7 +547,7 @@ impl TextEditor {
         commit: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some((analyzer, view, _uri)) = self.lsp_target(index, cx) else {
+        let Some((server, view, _uri)) = self.lsp_target(index, cx) else {
             return;
         };
         // `host_data` is index + 1; 0 wraps to a miss.
@@ -483,7 +565,7 @@ impl TextEditor {
         else {
             return;
         };
-        let Ok(response) = analyzer
+        let Ok(response) = server
             .read(cx)
             .send_request_async("completionItem/resolve", item)
         else {
@@ -547,11 +629,11 @@ impl TextEditor {
     }
 
     fn lsp_definition(&mut self, index: usize, request: LspRequest, cx: &mut Context<Self>) {
-        let Some((analyzer, _view, uri)) = self.lsp_target(index, cx) else {
+        let Some((server, _view, uri)) = self.lsp_target(index, cx) else {
             return;
         };
         let params = position_params(&uri, request.position);
-        let Ok(response) = analyzer
+        let Ok(response) = server
             .read(cx)
             .send_request_async("textDocument/definition", params)
         else {
@@ -623,7 +705,7 @@ impl TextEditor {
     ) -> Result<
         (
             usize,
-            Entity<RustAnalyzerManager>,
+            Entity<LanguageServer>,
             Entity<WgpuiEditorView>,
             String,
         ),
@@ -634,13 +716,13 @@ impl TextEditor {
             .iter()
             .position(|file| file.path == path)
             .ok_or("The file is not open")?;
-        if self.lsp.is_none() || !is_rust(&self.open_files[index].path) {
+        if self.lsp.is_none() || self.open_files[index].server.is_none() {
             return Err("No language server for this file");
         }
-        let (analyzer, view, uri) = self
+        let (server, view, uri) = self
             .lsp_target(index, cx)
             .ok_or("The language server is not ready")?;
-        Ok((index, analyzer, view, uri))
+        Ok((index, server, view, uri))
     }
 
     /// Asks the server for the definition under the caret of `path`.
@@ -653,8 +735,8 @@ impl TextEditor {
     /// Lists every reference to the symbol under the caret of `path`.
     pub fn find_references(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
         let title = "References";
-        let (analyzer, view, uri) = match self.lsp_target_for(path, cx) {
-            Ok((_, analyzer, view, uri)) => (analyzer, view, uri),
+        let (server, view, uri) = match self.lsp_target_for(path, cx) {
+            Ok((_, server, view, uri)) => (server, view, uri),
             Err(reason) => return self.show_locations(path, title, Err(reason), cx),
         };
         let Some(request) = view.update(cx, |view, _| view.lsp_request_at_caret()) else {
@@ -665,7 +747,7 @@ impl TextEditor {
         self.request_locations(
             path,
             title,
-            analyzer,
+            server,
             "textDocument/references",
             params,
             cx,
@@ -687,15 +769,15 @@ impl TextEditor {
     /// Lists the symbols declared in `path`, outermost first.
     pub fn document_symbols(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
         let title = "Symbols";
-        let (analyzer, uri) = match self.lsp_target_for(path, cx) {
-            Ok((_, analyzer, _, uri)) => (analyzer, uri),
+        let (server, uri) = match self.lsp_target_for(path, cx) {
+            Ok((_, server, _, uri)) => (server, uri),
             Err(reason) => return self.show_locations(path, title, Err(reason), cx),
         };
         let params = json!({ "textDocument": { "uri": uri } });
         self.request_locations(
             path,
             title,
-            analyzer,
+            server,
             "textDocument/documentSymbol",
             params,
             cx,
@@ -710,13 +792,13 @@ impl TextEditor {
         &mut self,
         path: &std::path::Path,
         title: &'static str,
-        analyzer: Entity<RustAnalyzerManager>,
+        server: Entity<LanguageServer>,
         method: &str,
         params: Value,
         cx: &mut Context<Self>,
         parse: fn(&Value, &std::path::Path) -> Vec<LocationItem>,
     ) {
-        let Ok(response) = analyzer.read(cx).send_request_async(method, params) else {
+        let Ok(response) = server.read(cx).send_request_async(method, params) else {
             return self.show_locations(
                 path,
                 title,
@@ -819,8 +901,8 @@ impl TextEditor {
     }
 
     /// Formats the lines the selection of `path` touches (the whole
-    /// document without a selection). rust-analyzer only does range
-    /// formatting with a nightly rustfmt, so this asks for the whole
+    /// document without a selection). Servers differ in range formatting
+    /// (some need a nightly formatter for it), so this asks for the whole
     /// document and applies the edits that fall within those lines: the
     /// rest of the file is left as it is.
     pub fn format_selection(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
@@ -855,7 +937,7 @@ impl TextEditor {
         lines: Option<std::ops::RangeInclusive<usize>>,
         cx: &mut Context<Self>,
     ) {
-        let Ok((_, analyzer, view, uri)) = self.lsp_target_for(path, cx) else {
+        let Ok((_, server, view, uri)) = self.lsp_target_for(path, cx) else {
             return;
         };
         let version = view.read(cx).document_version();
@@ -863,7 +945,7 @@ impl TextEditor {
             "textDocument": { "uri": uri },
             "options": { "tabSize": 4, "insertSpaces": true },
         });
-        let Ok(response) = analyzer
+        let Ok(response) = server
             .read(cx)
             .send_request_async("textDocument/formatting", params)
         else {
@@ -896,8 +978,8 @@ impl TextEditor {
         cx: &mut Context<Self>,
     ) {
         let title = "Workspace Symbols";
-        let analyzer = match self.lsp_target_for(path, cx) {
-            Ok((_, analyzer, _, _)) => analyzer,
+        let server = match self.lsp_target_for(path, cx) {
+            Ok((_, server, _, _)) => server,
             Err(reason) => return self.show_locations(path, title, Err(reason), cx),
         };
         if query.trim().is_empty() {
@@ -911,7 +993,7 @@ impl TextEditor {
         self.request_locations(
             path,
             title,
-            analyzer,
+            server,
             "workspace/symbol",
             json!({ "query": query.trim() }),
             cx,
@@ -919,116 +1001,169 @@ impl TextEditor {
         );
     }
 
-    /// Opens the module that declares the one `path`'s caret is in.
-    pub fn go_to_parent_module(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        let Ok((_, analyzer, view, uri)) = self.lsp_target_for(path, cx) else {
-            return;
-        };
-        let Some(request) = view.update(cx, |view, _| view.lsp_request_at_caret()) else {
-            return;
-        };
-        let params = position_params(&uri, request.position);
-        self.navigate_to_answer(analyzer, "experimental/parentModule", params, cx);
+    /// The commands the server of the open file `path` offers (its spec's
+    /// [`ServerCommandSpec`]s, such as Rust's "Expand Macro Recursively"):
+    /// `(id, label)`, for the menu. Empty when no server has the file.
+    pub fn language_commands(
+        &self,
+        path: &std::path::Path,
+        cx: &App,
+    ) -> Vec<(&'static str, &'static str)> {
+        self.open_files
+            .iter()
+            .find(|file| file.path == path)
+            .and_then(|file| file.server.as_ref())
+            .map(|server| {
+                server
+                    .read(cx)
+                    .commands()
+                    .iter()
+                    .map(|command| (command.id, command.label))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
-    /// Opens the `Cargo.toml` of the crate `path` belongs to.
-    pub fn open_cargo_toml(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        let Ok((_, analyzer, _, uri)) = self.lsp_target_for(path, cx) else {
-            return;
-        };
-        let params = json!({ "textDocument": { "uri": uri } });
-        self.navigate_to_answer(analyzer, "rust-analyzer/openCargoToml", params, cx);
-    }
-
-    fn navigate_to_answer(
+    /// Runs the server command `id` for the open file `path`: asks the
+    /// server, then shows what the command's spec says its answer is (a
+    /// location to open, or text to show in a scratch file).
+    pub fn run_language_command(
         &mut self,
-        analyzer: Entity<RustAnalyzerManager>,
-        method: &str,
-        params: Value,
+        path: &std::path::Path,
+        id: &str,
         cx: &mut Context<Self>,
     ) {
-        let Ok(response) = analyzer.read(cx).send_request_async(method, params) else {
+        let Some(index) = self.open_files.iter().position(|file| file.path == path) else {
             return;
         };
-        cx.spawn(async move |this, cx| {
-            let Ok(response) = response.recv_async().await else {
-                return;
-            };
-            let Some((target, line, character)) = response.get("result").and_then(first_location)
-            else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.navigate_to(uri_to_path(&target), line, character, cx)
-            });
-        })
-        .detach();
-    }
-
-    /// Expands the macro call under `path`'s caret, recursively, and opens
-    /// the expansion as a scratch file.
-    pub fn expand_macro(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        let Ok((_, analyzer, view, uri)) = self.lsp_target_for(path, cx) else {
+        let Some(server) = self.open_files[index].server.clone() else {
             return;
         };
-        let Some(request) = view.update(cx, |view, _| view.lsp_request_at_caret()) else {
-            return;
-        };
-        let params = position_params(&uri, request.position);
-        let Ok(response) = analyzer
+        let Some(command) = server
             .read(cx)
-            .send_request_async("rust-analyzer/expandMacro", params)
+            .commands()
+            .iter()
+            .find(|command| command.id == id)
+            .copied()
         else {
             return;
         };
+        if !server.read(cx).is_initialized() {
+            return;
+        }
+        let view = self.open_files[index].view.clone();
+        let (line, column) = if command.needs_position {
+            match view.update(cx, |view, _| view.lsp_request_at_caret()) {
+                Some(request) => (request.position.line, request.position.column),
+                None => return,
+            }
+        } else {
+            (0, 0)
+        };
+        let context = CommandContext {
+            uri: path_to_uri(path),
+            line,
+            column,
+        };
+        let params = (command.params)(&context);
+        let Ok(response) = server.read(cx).send_request_async(command.method, params) else {
+            return;
+        };
         cx.spawn(async move |this, cx| {
             let Ok(response) = response.recv_async().await else {
                 return;
             };
-            let Some((name, expansion)) = response.get("result").and_then(macro_expansion) else {
-                return;
-            };
-            let file = std::env::temp_dir()
-                .join("pulsar_macro_expansions")
-                .join(format!("{}.rs", sanitize_file_name(&name)));
-            let written = file
-                .parent()
-                .map(engine_fs::virtual_fs::create_dir_all)
-                .unwrap_or(Ok(()))
-                .and_then(|_| {
-                    engine_fs::virtual_fs::write_file(
-                        &file,
-                        format!("// Expansion of {name}!\n{expansion}\n").as_bytes(),
-                    )
-                });
-            if let Err(error) = written {
-                tracing::warn!("Could not write the expansion of {name}: {error}");
-                return;
-            }
-            let _ = this.update(cx, |this, cx| {
-                // A scratch file shown before is replaced by the new text.
-                if let Some(index) = this.open_files.iter().position(|open| open.path == file) {
-                    let text = format!("// Expansion of {name}!\n{expansion}\n");
-                    this.open_files[index]
-                        .view
-                        .update(cx, |view, cx| view.replace_text(text, cx));
+            let result = response.get("result").cloned().unwrap_or(Value::Null);
+            match command.result {
+                CommandResult::OpenLocation => {
+                    let Some((target, line, character)) = first_location(&result) else {
+                        return;
+                    };
+                    let _ = this.update(cx, |this, cx| {
+                        this.navigate_to(uri_to_path(&target), line, character, cx)
+                    });
                 }
-                this.navigate_to(file, 0, 0, cx)
-            });
+                CommandResult::ShowText => {
+                    let Some((name, text)) = (command.text)(&result) else {
+                        return;
+                    };
+                    let header = format!("// {}: {name}\n{text}\n", command.label);
+                    let file = std::env::temp_dir()
+                        .join("pulsar_language_server_output")
+                        .join(format!(
+                            "{}.{}",
+                            sanitize_file_name(&name),
+                            command.scratch_extension
+                        ));
+                    let written = file
+                        .parent()
+                        .map(engine_fs::virtual_fs::create_dir_all)
+                        .unwrap_or(Ok(()))
+                        .and_then(|_| engine_fs::virtual_fs::write_file(&file, header.as_bytes()));
+                    if let Err(error) = written {
+                        tracing::warn!("Could not write the output of {}: {error}", command.label);
+                        return;
+                    }
+                    let _ = this.update(cx, |this, cx| {
+                        // A scratch file shown before is replaced by the new text.
+                        if let Some(index) = this.open_files.iter().position(|open| open.path == file) {
+                            this.open_files[index]
+                                .view
+                                .update(cx, |view, cx| view.replace_text(header.clone(), cx));
+                        }
+                        this.navigate_to(file, 0, 0, cx)
+                    });
+                }
+                CommandResult::None => {}
+            }
         })
         .detach();
     }
 
-    /// Tells the server to reload the project's Cargo workspace.
-    pub fn reload_workspace(&mut self, cx: &mut Context<Self>) {
-        if let Some(analyzer) = self
-            .analyzer()
-            .filter(|analyzer| analyzer.read(cx).is_running())
-        {
-            let _ = analyzer
-                .read(cx)
-                .send_request_async("rust-analyzer/reloadWorkspace", Value::Null);
-        }
+    /// Renames the symbol under the caret of `path` to `new_name`: the server
+    /// answers with a `WorkspaceEdit`, applied across the open buffers (one
+    /// undo group each) and the files on disk.
+    pub fn rename_symbol(
+        &mut self,
+        path: &std::path::Path,
+        new_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok((_, server, view, uri)) = self.lsp_target_for(path, cx) else {
+            return;
+        };
+        let Some(request) = view.update(cx, |view, _| view.lsp_request_at_caret()) else {
+            return;
+        };
+        let mut params = position_params(&uri, request.position);
+        params["newName"] = Value::String(new_name);
+        let Ok(response) = server.read(cx).send_request_async("textDocument/rename", params) else {
+            return;
+        };
+        cx.spawn(async move |_this, cx| {
+            let Ok(response) = response.recv_async().await else {
+                return;
+            };
+            if let Some(error) = response.get("error") {
+                tracing::warn!("rename refused: {error}");
+                return;
+            }
+            let Some(edit) = response.get("result").filter(|result| !result.is_null()) else {
+                return;
+            };
+            let outcome = pulsar_lsp::WorkspaceEdit::from_value(edit)
+                .and_then(|edit| cx.update(|cx| pulsar_lsp::edit::apply_workspace_edit_in_app(&edit, cx)));
+            match outcome {
+                Ok(applied) => tracing::info!(
+                    "renamed: {} buffers, {} files, {} resource operations",
+                    applied.edited_buffers.len(),
+                    applied.written_files.len(),
+                    applied.resource_operations
+                ),
+                Err(error) => tracing::warn!("rename failed: {error}"),
+            }
+        })
+        .detach();
     }
 }
 
@@ -1054,6 +1189,78 @@ pub struct LocationItem {
     pub detail: String,
 }
 
+// ---- workspace edits ---------------------------------------------------------
+
+/// The text editors that exist, so an edit from a server (`workspace/applyEdit`,
+/// rename, a refactor) reaches the buffers open in any of them.
+#[derive(Default)]
+struct OpenTextEditors(Vec<WeakEntity<TextEditor>>);
+
+impl Global for OpenTextEditors {}
+
+/// Make `editor` reachable by workspace edits, and install the host that
+/// applies them (once).
+pub(super) fn register_editor(editor: WeakEntity<TextEditor>, cx: &mut App) {
+    cx.default_global::<OpenTextEditors>().0.push(editor);
+    if !cx.has_global::<pulsar_lsp::EditHost>() {
+        cx.set_global(pulsar_lsp::EditHost(Arc::new(EditorBuffers)));
+    }
+}
+
+fn live_editors(cx: &App) -> Vec<Entity<TextEditor>> {
+    cx.try_global::<OpenTextEditors>()
+        .map(|editors| editors.0.iter().filter_map(WeakEntity::upgrade).collect())
+        .unwrap_or_default()
+}
+
+/// The view that has `path` open, in any editor.
+fn view_of(path: &std::path::Path, cx: &App) -> Option<Entity<WgpuiEditorView>> {
+    let key = path_key(path);
+    live_editors(cx).into_iter().find_map(|editor| {
+        editor
+            .read(cx)
+            .open_files
+            .iter()
+            .find(|file| path_key(&file.path) == key)
+            .map(|file| file.view.clone())
+    })
+}
+
+/// The open buffers, as the [`pulsar_lsp::BufferEdits`] the workspace edit
+/// applier edits through: one undo group per file.
+struct EditorBuffers;
+
+impl pulsar_lsp::BufferEdits<App> for EditorBuffers {
+    fn text(&self, path: &std::path::Path, cx: &mut App) -> Option<String> {
+        view_of(path, cx).map(|view| view.read(cx).text())
+    }
+
+    fn apply(
+        &self,
+        path: &std::path::Path,
+        edits: &[pulsar_lsp::LspTextEdit],
+        cx: &mut App,
+    ) -> Result<(), String> {
+        let view = view_of(path, cx).ok_or("the file is no longer open")?;
+        let edits = edits
+            .iter()
+            .map(|edit| PositionEdit {
+                start: TextPosition {
+                    line: edit.start.0 as usize,
+                    column: edit.start.1 as usize,
+                },
+                end: TextPosition {
+                    line: edit.end.0 as usize,
+                    column: edit.end.1 as usize,
+                },
+                new_text: edit.new_text.clone(),
+            })
+            .collect();
+        view.update(cx, |view, cx| view.apply_position_edits(edits, cx));
+        Ok(())
+    }
+}
+
 // ---- protocol conversions ---------------------------------------------------
 
 fn position_json(position: TextPosition) -> Value {
@@ -1076,7 +1283,7 @@ fn content_change(change: &TextChange) -> Value {
 }
 
 fn diagnostic_input(diagnostic: &ui::diagnostics::Diagnostic) -> DiagnosticInput {
-    // The analyzer reports 1-based line/column; LSP positions are 0-based.
+    // The server reports 1-based line/column; LSP positions are 0-based.
     let start = TextPosition {
         line: diagnostic.line.saturating_sub(1),
         column: diagnostic.column.saturating_sub(1),
@@ -1337,14 +1544,6 @@ fn symbol_kind_name(kind: u64) -> &'static str {
         .unwrap_or("symbol")
 }
 
-/// The macro name and expansion of a `rust-analyzer/expandMacro` result.
-fn macro_expansion(result: &Value) -> Option<(String, String)> {
-    Some((
-        result.get("name")?.as_str()?.to_owned(),
-        result.get("expansion")?.as_str()?.to_owned(),
-    ))
-}
-
 fn sanitize_file_name(name: &str) -> String {
     let name: String = name
         .chars()
@@ -1391,7 +1590,7 @@ fn completion_entry(item: &Value, host_data: u64) -> Option<CompletionEntry> {
         .get("detail")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    // rust-analyzer's signature hint lives in labelDetails.
+    // A server's signature hint lives in labelDetails.
     entry.label_detail = item.get("labelDetails").and_then(|details| {
         let parts: Vec<&str> = ["detail", "description"]
             .iter()
@@ -1439,7 +1638,6 @@ mod tests {
     // `super::*` brings in `gpui::*`, whose `test` attribute would shadow the
     // built-in one that `#[gpui::test]` expands to, and recurse.
     use core::prelude::v1::test;
-    use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
     use plugin_editor_api::{EditorServices, EditorSettingsSnapshot};
 
     struct Host;
@@ -1463,17 +1661,17 @@ mod tests {
     /// The regression this module exists for: an editor that was handed a
     /// language server by its context must be attached to it, and say so.
     #[gpui::test]
-    fn an_editor_attaches_to_the_language_server_in_its_context(cx: &mut TestAppContext) {
+    fn an_editor_attaches_to_the_language_servers_in_its_context(cx: &mut TestAppContext) {
         let (_host, vcx) = cx.add_window_view(|_, _| Host);
-        let analyzer = vcx.update(|window, app| app.new(|cx| RustAnalyzerManager::new(window, cx)));
+        let servers = vcx.update(|_, app| app.new(LanguageServers::new));
         let settings = EditorSettingsSnapshot::default().with_services(EditorServices {
-            language_server: Some(analyzer),
+            language_servers: Some(servers),
             ..Default::default()
         });
         let (attached, status) = status_of(settings, cx);
         assert!(attached, "the handle in the context was ignored");
         assert!(
-            status.starts_with("rust-analyzer:"),
+            status.starts_with("language server: no file"),
             "unexpected status: {status}"
         );
     }
@@ -1628,13 +1826,7 @@ mod tests {
     }
 
     #[test]
-    fn macro_expansions_become_scratch_files() {
-        let result = json!({ "name": "vec", "expansion": "<[_]>::into_vec(...)" });
-        assert_eq!(
-            macro_expansion(&result),
-            Some(("vec".into(), "<[_]>::into_vec(...)".into()))
-        );
-        assert_eq!(macro_expansion(&Value::Null), None);
+    fn scratch_file_names_are_sanitized() {
         assert_eq!(sanitize_file_name("my::mac"), "my__mac");
         assert_eq!(sanitize_file_name(""), "macro");
     }

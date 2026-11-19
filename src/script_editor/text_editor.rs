@@ -56,10 +56,8 @@ actions!(
         EditorGoToSymbol,
         /// Searches the symbols of the whole workspace by name.
         EditorGoToWorkspaceSymbol,
-        EditorGoToParentModule,
-        EditorExpandMacro,
-        EditorOpenCargoToml,
-        EditorReloadWorkspace,
+        /// Renames the symbol under the caret (the rename bar asks for the name).
+        EditorRenameSymbol,
         EditorGenerateStressFile,
         /// Closes the find, go-to-line or location bar.
         EditorCloseBar,
@@ -80,6 +78,14 @@ actions!(
 );
 
 pub use lsp::{LocationItem, LocationList};
+
+/// Runs one of the open file's language server commands (its spec's
+/// `ServerCommandSpec`: Rust's "Expand Macro Recursively"), by id.
+#[derive(Clone, PartialEq, Eq, serde::Deserialize, gpui::Action)]
+#[action(namespace = mockaco_editor, no_json)]
+pub struct EditorServerCommand {
+    pub id: String,
+}
 
 const FONT_FAMILY: &str = "JetBrains Mono";
 const FONT_SIZE: f32 = 14.0;
@@ -117,6 +123,9 @@ pub struct OpenFile {
     pub version: i32,
     /// The language server has this document open.
     lsp_open: bool,
+    /// The server that claims this file (routed by language and root), once
+    /// it has been found; `None` when no server handles the file.
+    server: Option<Entity<pulsar_lsp::LanguageServer>>,
     _subscription: Subscription,
 }
 
@@ -126,7 +135,7 @@ pub struct TextEditor {
     current_file_index: Option<usize>,
     applied_theme: Option<SurfaceTheme>,
     generating: bool,
-    /// The engine's shared rust-analyzer, when this editor has one.
+    /// The engine's language servers, when this editor has them.
     lsp: Option<lsp::LspClient>,
     /// What Go to References or Go to Symbol found, shown by the panel of
     /// the file it was asked from.
@@ -165,9 +174,11 @@ impl TextEditor {
             ai_requests,
         };
         editor.serve_ai_requests(receiver, cx);
-        // The language server arrives through the plugin API's context.
-        if let Some(analyzer) = settings.services().language_server.clone() {
-            editor.set_rust_analyzer(analyzer, cx);
+        // Workspace edits reach this editor's buffers.
+        lsp::register_editor(cx.entity().downgrade(), cx);
+        // The language servers arrive through the plugin API's context.
+        if let Some(servers) = settings.services().language_servers.clone() {
+            editor.set_language_servers(servers, cx);
         }
         editor
     }
@@ -191,9 +202,6 @@ impl TextEditor {
             view
         });
         view.update(cx, |view, cx| view.set_theme(theme, cx));
-        if self.lsp.is_some() && lsp::is_rust(path) {
-            view.update(cx, |view, cx| view.set_language_intelligence(true, cx));
-        }
         view
     }
 
@@ -212,6 +220,7 @@ impl TextEditor {
             is_modified: false,
             version: 1,
             lsp_open: false,
+            server: None,
             _subscription: subscription,
         });
         self.current_file_index = Some(self.open_files.len() - 1);
@@ -236,6 +245,7 @@ impl TextEditor {
                 // The server is told what changed, not the whole file: the
                 // editor logged the edits and this drains them.
                 self.lsp_sync(index, cx);
+                self.lsp_check(index, cx);
                 // Only the tab's dirty marker depends on this.
                 if !was_modified {
                     cx.notify();
@@ -266,6 +276,7 @@ impl TextEditor {
         let view = self.create_view(&path, content.clone(), cx);
         self.push_file(path.clone(), view, cx);
         self.lsp_open_pending(cx);
+        self.lsp_check(self.open_files.len() - 1, cx);
         self.focus_current(window, cx);
         cx.emit(TextEditorEvent::FileOpened { path, content });
         cx.notify();
