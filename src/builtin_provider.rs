@@ -167,7 +167,7 @@ impl BuiltinEditorProvider for ScriptEditorBuiltinProvider {
         if services.language_servers.is_none() {
             tracing::warn!("No language servers in the editor context; Script Editor LSP is off");
         }
-        let settings = plugin_editor_api::EditorSettingsSnapshot::default().with_services(services);
+        let settings = editor_context.settings.clone().with_services(services);
         let panel = cx.new(|cx| crate::ScriptEditorPanel::new_with_settings(window, cx, settings));
         panel.update(cx, |editor, ecx| {
             if let Some(project_root) = project_root {

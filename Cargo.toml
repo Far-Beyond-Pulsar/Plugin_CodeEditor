@@ -36,6 +36,8 @@ mockaco-gpui = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3
 mockaco-language = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70" }
 mockaco-core = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70" }
 mockaco-diff = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70" }
+# The display configuration of a source view (its tab width).
+mockaco-renderer = { git = "https://github.com/Far-Beyond-Pulsar/Mockaco", rev = "e3bb37436ed36b0316cda1b059e4238a676afd70" }
 
 # Engine dependencies
 engine_state  = { workspace = true }

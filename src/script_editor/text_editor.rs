@@ -131,6 +131,11 @@ pub struct OpenFile {
 
 pub struct TextEditor {
     focus_handle: FocusHandle,
+    /// Columns a tab stop spans and one indent level inserts (the editor's
+    /// `code_editor.tab_width` setting).
+    tab_width: usize,
+    /// Whether source views show the minimap (`code_editor.minimap`).
+    show_minimap: bool,
     open_files: Vec<OpenFile>,
     current_file_index: Option<usize>,
     applied_theme: Option<SurfaceTheme>,
@@ -164,6 +169,8 @@ impl TextEditor {
         let (ai_requests, receiver) = futures::channel::mpsc::unbounded();
         let mut editor = Self {
             focus_handle: cx.focus_handle(),
+            tab_width: settings.integer("tab_width", 4).clamp(1, 16) as usize,
+            show_minimap: settings.boolean("minimap", true),
             open_files: Vec::new(),
             current_file_index: None,
             applied_theme: None,
@@ -189,16 +196,18 @@ impl TextEditor {
         content: String,
         cx: &mut Context<Self>,
     ) -> Entity<WgpuiEditorView> {
+        let show_minimap = self.show_minimap;
         let theme = surface_theme(cx.theme());
         let surface = EditorSurface::with_language(
             content,
-            Default::default(),
+            mockaco_renderer::DisplayConfig::unwrapped().tab_width(self.tab_width),
             SurfaceGeometry::default(),
             Language::from_path(path),
         );
         let view = cx.new(|cx| {
             let mut view = WgpuiEditorView::new(surface, cx);
             view.set_font(FONT_FAMILY, FONT_SIZE, LINE_HEIGHT);
+            view.set_show_minimap(show_minimap, cx);
             view
         });
         view.update(cx, |view, cx| view.set_theme(theme, cx));
