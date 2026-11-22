@@ -8,6 +8,9 @@ crate-type = ["cdylib", "rlib"]
 name = "script_editor_plugin"
 
 [features]
+# The plugin as a library of its own, loaded by the editor from plugins/editor:
+# cargo build -p <this package> --release --features dll
+dll = ["plugin_editor_api/editor", "plugin_editor_api/shared-dylibs"]
 # Pulsar statically links this crate when it is used as a built-in editor.
 # Dynamic plugin builds keep the loader ABI exports by default.
 builtin = []
