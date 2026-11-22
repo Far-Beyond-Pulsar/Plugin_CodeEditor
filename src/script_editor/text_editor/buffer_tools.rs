@@ -4,12 +4,11 @@
 
 use super::{TextEditor, TextEditorEvent};
 use crate::script_editor::ai::tools::{
-    apply_line_edit, line_column, read_lines, selection_json, BufferOp, BufferRequest,
+    apply_line_edit, read_lines, selection_json, BufferOp, BufferRequest,
 };
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt as _;
 use gpui::*;
-use mockaco_core::DiagnosticSeverity;
 use serde_json::{json, Value};
 
 impl TextEditor {
@@ -79,25 +78,30 @@ impl TextEditor {
                 Ok(selection_json(&view.text(), view.selection_range()))
             }
             BufferOp::Diagnostics => {
-                let view = view.read(cx);
-                let text = view.text();
-                let items: Vec<Value> = view
-                    .surface
-                    .lsp_diagnostics()
+                // The store, every source merged (what the views are fed from),
+                // so the answer is the language service's, not a view's copy.
+                let stored = self
+                    .servers()
+                    .map(|servers| servers.read(cx).diagnostics().read(cx).for_file(&path))
+                    .unwrap_or_default();
+                let items: Vec<Value> = stored
                     .iter()
-                    .map(|diagnostic| {
-                        let (line, column) = line_column(&text, diagnostic.range.start);
+                    .map(|(origin, diagnostic)| {
+                        use ui::diagnostics::DiagnosticSeverity as Severity;
                         json!({
                             "severity": match diagnostic.severity {
-                                DiagnosticSeverity::Error => "error",
-                                DiagnosticSeverity::Warning => "warning",
-                                DiagnosticSeverity::Info => "info",
-                                DiagnosticSeverity::Hint => "hint",
+                                Severity::Error => "error",
+                                Severity::Warning => "warning",
+                                Severity::Information => "info",
+                                Severity::Hint => "hint",
                             },
-                            "line": line,
-                            "column": column,
+                            "line": diagnostic.line,
+                            "column": diagnostic.column,
                             "message": diagnostic.message,
-                            "source": diagnostic.source,
+                            "source": diagnostic
+                                .source
+                                .clone()
+                                .unwrap_or_else(|| origin.label()),
                         })
                     })
                     .collect();

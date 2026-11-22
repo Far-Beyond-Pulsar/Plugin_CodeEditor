@@ -148,7 +148,7 @@ impl TextEditor {
         format!("{}: {state}, document {document}", spec.display_name)
     }
 
-    fn servers(&self) -> Option<Entity<LanguageServers>> {
+    pub(super) fn servers(&self) -> Option<Entity<LanguageServers>> {
         self.lsp.as_ref().map(|client| client.servers.clone())
     }
 
