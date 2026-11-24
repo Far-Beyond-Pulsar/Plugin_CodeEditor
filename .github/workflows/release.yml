@@ -15,5 +15,8 @@ jobs:
     uses: Far-Beyond-Pulsar/Pulsar-Native/.github/workflows/plugin-release.yml@main
     with:
       plugin_dir: plugins/vendor/code_editor
+      # mockaco_language calls the tree-sitter grammar entry point `tree_sitter_rust`, which the macOS ui_dylib
+      # does not yet export for the plugin to link (see .agents/BUILD_LESSONS.md).
+      optional_platforms: macos-x86_64 macos-arm64
     permissions:
       contents: write
